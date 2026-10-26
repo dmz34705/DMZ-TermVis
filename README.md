@@ -2,10 +2,10 @@
 
 A real-time audio visualizer that runs entirely in your terminal. It turns music into animated text using colored block characters, braille dots and scrolling code. It's a single standalone program with nothing to install.
 
-- **7 modes:** Bars, Mirror, Wave (oscilloscope), Waterfall (spectrogram), Rain (falling code), Code (scrolling source code lit up by the spectrum), Radial
-- **14 color themes:** Fire, Ocean, Neon, Matrix, Rainbow, Mono, Synthwave, Cyberpunk, Sunset, Amber, Ice, Toxic, Blood, Vapor
+- **8 modes:** Bars, Mirror, Wave (oscilloscope), Waterfall (spectrogram), Rain (falling code), Code (scrolling source code lit up by the spectrum), Radial, and **Scope**, a true XY oscilloscope for [oscilloscope music](#oscilloscope-music-scope-mode)
+- **15 color themes:** Fire, Ocean, Neon, Matrix, Rainbow, Mono, Synthwave, Cyberpunk, Sunset, Amber, Ice, Toxic, Blood, Vapor, Phosphor
 - **4 glyph styles** for bars: Blocks, ASCII, Code, Dots
-- A **settings panel** with 22 adjustable parameters, saved automatically so it reopens where you left off
+- A **settings panel** with 27 adjustable parameters, saved automatically so it reopens where you left off
 - **Windows:** visualizes whatever your PC is playing (no setup needed), or the microphone
 - **macOS:** visualizes the default input device (mic, or system audio via [BlackHole](#visualizing-system-audio-on-macos))
 
@@ -15,9 +15,9 @@ Get the archive for your system from the [Releases](../../releases) page:
 
 | System | File |
 |---|---|
-| Windows 10/11 (64-bit) | `DMZ-TermVis-1.0-windows-x64.zip` |
-| Mac with Apple Silicon (M1 and later) | `DMZ-TermVis-1.0-macos-arm64.tar.gz` |
-| Mac with Intel processor | `DMZ-TermVis-1.0-macos-intel-x64.tar.gz` |
+| Windows 10/11 (64-bit) | `DMZ-TermVis-1.1-windows-x64.zip` |
+| Mac with Apple Silicon (M1 and later) | `DMZ-TermVis-1.1-macos-arm64.tar.gz` |
+| Mac with Intel processor | `DMZ-TermVis-1.1-macos-intel-x64.tar.gz` |
 
 ### Windows
 
@@ -31,13 +31,13 @@ It looks best in **Windows Terminal**, the default on Windows 11. If Windows Sma
 
 TermVis isn't registered with Apple, so macOS needs a one-time setup before it will run it. Do these steps in **Terminal**, not by double-clicking files in Finder.
 
-1. **Extract the download.** Double-click the `.tar.gz` file in your Downloads folder. This creates a folder like `DMZ-TermVis-1.0-macos-arm64`.
+1. **Extract the download.** Double-click the `.tar.gz` file in your Downloads folder. This creates a folder like `DMZ-TermVis-1.1-macos-arm64`.
 
 2. **Open Terminal** (Applications → Utilities → Terminal, or press ⌘ Space and type *Terminal*).
 
 3. **Go to the folder.** Use `macos-intel-x64` instead if you downloaded the Intel version:
    ```sh
-   cd ~/Downloads/DMZ-TermVis-1.0-macos-arm64
+   cd ~/Downloads/DMZ-TermVis-1.1-macos-arm64
    ```
 
 4. **Run the one-time setup:**
@@ -55,7 +55,7 @@ TermVis isn't registered with Apple, so macOS needs a one-time setup before it w
 
 6. **Allow microphone access.** The first time, macOS asks whether Terminal may use the microphone. Click **Allow**. TermVis needs this to hear any audio, including system audio through BlackHole.
 
-Next time, open Terminal and run `cd ~/Downloads/DMZ-TermVis-1.0-macos-arm64` and then `./termvis`. You can move the folder anywhere you like and `cd` there instead.
+Next time, open Terminal and run `cd ~/Downloads/DMZ-TermVis-1.1-macos-arm64` and then `./termvis`. You can move the folder anywhere you like and `cd` there instead.
 
 #### macOS troubleshooting
 
@@ -98,13 +98,40 @@ macOS doesn't let apps listen to system audio directly. The free [BlackHole](htt
 
 To go back, set Output to your speakers and Input to your microphone.
 
+## Oscilloscope music (Scope mode)
+
+Press **8** for Scope mode. It works like a real analog oscilloscope in **XY mode**: the **left channel moves the beam horizontally** and the **right channel moves it vertically**. Oscilloscope music is composed so that this draws pictures, such as shapes, text and animations, while you listen. Ordinary stereo music shows a shifting, cloud-like pattern, and mono audio shows a diagonal line.
+
+To look like a real scope:
+- **Every sample is traced** (48,000 per second), smoothed between samples by default, the way a scope's beam moves continuously.
+- **Beam brightness follows speed.** Where the beam moves slowly, the phosphor glows bright; fast jumps between shapes leave only a faint line.
+- **Phosphor afterglow:** each trace fades over a short time, like a CRT screen.
+- **The screen is square,** with a 1:1 aspect ratio and an 8×8 graticule (grid).
+- **Silence parks the beam** as a dot in the center.
+
+For the classic look, pick the **Phosphor** theme (green CRT). The settings panel (**Tab**) has these scope options:
+
+| Setting | What it does |
+|---|---|
+| Scope zoom | Sizes the picture (**↑/↓** gain also works) |
+| Scope persistence | How long the phosphor glows (default 60 ms) |
+| Beam intensity | Overall brightness of the trace |
+| Scope smooth beam | Smooth curves between samples (on) or straight lines (off) |
+| Scope graticule | Shows or hides the grid |
+
+**For an accurate picture:**
+- Play lossless or high-quality files. Lossy streaming, especially low-bitrate video sites, smears the shapes.
+- Turn off anything that changes the stereo signal: Windows **Spatial sound** or **audio enhancements**, macOS **Spatialize Stereo**, equalizers and "loudness" effects.
+- **macOS:** use BlackHole 2ch (see above) so both channels arrive intact. A built-in microphone is mono and only draws a diagonal line.
+- For music made for scopes, try Jerobeam Fenderson's *Oscilloscope Music* album.
+
 ## Controls
 
 Press **H** at any time to see these on screen, or **Tab** to open the settings panel.
 
 | Key | Action |
 |---|---|
-| **M** / **1–7** | Change mode |
+| **M** / **1–8** | Change mode |
 | **C** / **Shift+C** | Next / previous color theme |
 | **K** | Glyph style: blocks, ascii, code, dots |
 | **V** | Color by: height, frequency, loudness |
@@ -120,7 +147,7 @@ Press **H** at any time to see these on screen, or **Tab** to open the settings 
 | **R** | Reset to defaults |
 | **Q** / **Esc** | Quit |
 
-The settings panel also covers dynamic range, low and high frequency cutoffs, treble boost, peak gravity, rain speed, code scroll speed, radial spin, frame rate and terminal color mode.
+The settings panel also covers dynamic range, low and high frequency cutoffs, treble boost, peak gravity, rain speed, code scroll speed, radial spin, the scope options, frame rate and terminal color mode.
 
 Settings are saved to `termvis.ini` next to the program about a second after any change, so closing the window keeps them. You can also edit that file by hand.
 
@@ -130,9 +157,9 @@ Settings are saved to `termvis.ini` next to the program about a second after any
 termvis [options]
   --mic                 Windows: visualize the microphone instead of system audio
   --system              Windows: visualize system audio (default)
-  --mode <name|1-7>     bars, mirror, wave, waterfall, rain, code, radial
+  --mode <name|1-8>     bars, mirror, wave, waterfall, rain, code, radial, scope
   --theme <name>        fire, ocean, neon, matrix, rainbow, mono, synthwave,
-                        cyberpunk, sunset, amber, ice, toxic, blood, vapor
+                        cyberpunk, sunset, amber, ice, toxic, blood, vapor, phosphor
   --glyphs <name>       blocks, ascii, code, dots
   --colorby <name>      height, frequency, loudness
   --gain <dB>           extra gain, -30..30

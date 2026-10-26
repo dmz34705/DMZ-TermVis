@@ -24,7 +24,7 @@ namespace TermVis
     interface IAudioSource : IDisposable
     {
         int SampleRate { get; }
-        int Read(Ring ring);          // drains pending audio into the ring as mono samples, returns frames read
+        int Read(AudioRings rings);   // drains pending audio into the rings, returns frames read
         bool DeviceChanged();         // true when the system default device moved elsewhere
     }
 
@@ -56,8 +56,8 @@ namespace TermVis
 
         readonly InputCallback callback; // held so the delegate outlives the native queue
         readonly object gate = new object();
-        readonly float[] pending = new float[Rate];
-        readonly float[] scratch = new float[BufferFrames];
+        readonly float[] pending = new float[Rate * 2];          // interleaved L/R
+        readonly float[] scratch = new float[BufferFrames * 2];
         int pendingCount;
         IntPtr queue;
         volatile bool running;
@@ -69,7 +69,7 @@ namespace TermVis
             var fmt = new StreamFormat
             {
                 SampleRate = Rate, FormatID = LinearPCM, FormatFlags = FloatPacked,
-                BytesPerPacket = 4, FramesPerPacket = 1, BytesPerFrame = 4, ChannelsPerFrame = 1, BitsPerChannel = 32,
+                BytesPerPacket = 8, FramesPerPacket = 1, BytesPerFrame = 8, ChannelsPerFrame = 2, BitsPerChannel = 32,
             };
             callback = OnInput;
             // A null run loop makes the queue call back on its own internal thread.
@@ -77,7 +77,7 @@ namespace TermVis
             for (int i = 0; i < BufferCount; i++)
             {
                 IntPtr buf;
-                Check(AudioQueueAllocateBuffer(queue, BufferFrames * 4, out buf), "AudioQueueAllocateBuffer");
+                Check(AudioQueueAllocateBuffer(queue, BufferFrames * 8, out buf), "AudioQueueAllocateBuffer");
                 Check(AudioQueueEnqueueBuffer(queue, buf, 0, IntPtr.Zero), "AudioQueueEnqueueBuffer");
             }
             running = true;
@@ -94,7 +94,7 @@ namespace TermVis
             if (!running) return;
             // AudioQueueBuffer layout: UInt32 capacity, void* data, UInt32 byteSize
             IntPtr data = Marshal.ReadIntPtr(buffer, IntPtr.Size);
-            int count = Math.Min(scratch.Length, Marshal.ReadInt32(buffer, IntPtr.Size * 2) / 4);
+            int count = Math.Min(scratch.Length, Marshal.ReadInt32(buffer, IntPtr.Size * 2) / 8 * 2);
             if (count > 0)
             {
                 Marshal.Copy(data, scratch, 0, count);
@@ -108,12 +108,12 @@ namespace TermVis
             AudioQueueEnqueueBuffer(q, buffer, 0, IntPtr.Zero);
         }
 
-        public int Read(Ring ring)
+        public int Read(AudioRings rings)
         {
             lock (gate)
             {
-                for (int i = 0; i < pendingCount; i++) ring.Push(pending[i]);
-                int n = pendingCount;
+                for (int i = 0; i + 1 < pendingCount; i += 2) rings.Push(pending[i], pending[i + 1]);
+                int n = pendingCount / 2;
                 pendingCount = 0;
                 return n;
             }
@@ -250,8 +250,8 @@ namespace TermVis
             client.Start();
         }
 
-        // Drains every pending packet into the ring as mono samples. Returns frames read.
-        public int Read(Ring ring)
+        // Drains every pending packet into the rings. Returns frames read.
+        public int Read(AudioRings rings)
         {
             int total = 0;
             uint packet;
@@ -264,9 +264,9 @@ namespace TermVis
                 capture.GetBuffer(out data, out frames, out flags, out p1, out p2);
                 int n = (int)frames;
                 if ((flags & BUFFER_SILENT) != 0)
-                    for (int i = 0; i < n; i++) ring.Push(0f);
+                    for (int i = 0; i < n; i++) rings.Push(0f, 0f);
                 else
-                    Convert(data, n, ring);
+                    Convert(data, n, rings);
                 capture.ReleaseBuffer(frames);
                 total += n;
                 capture.GetNextPacketSize(out packet);
@@ -274,55 +274,40 @@ namespace TermVis
             return total;
         }
 
-        void Convert(IntPtr data, int frames, Ring ring)
+        // Converts any supported sample format to floats, then pushes channel 0 as left and channel 1 as right.
+        void Convert(IntPtr data, int frames, AudioRings rings)
         {
             int count = frames * channels;
-            float inv = 1f / channels;
+            if (fbuf.Length < count) fbuf = new float[count];
             if (isFloat && bits == 32)
-            {
-                if (fbuf.Length < count) fbuf = new float[count];
                 Marshal.Copy(data, fbuf, 0, count);
-                for (int f = 0, i = 0; f < frames; f++)
-                {
-                    float s = 0;
-                    for (int c = 0; c < channels; c++) s += fbuf[i++];
-                    ring.Push(s * inv);
-                }
-            }
             else if (bits == 16)
             {
                 if (sbuf.Length < count) sbuf = new short[count];
                 Marshal.Copy(data, sbuf, 0, count);
-                for (int f = 0, i = 0; f < frames; f++)
-                {
-                    float s = 0;
-                    for (int c = 0; c < channels; c++) s += sbuf[i++] / 32768f;
-                    ring.Push(s * inv);
-                }
+                for (int i = 0; i < count; i++) fbuf[i] = sbuf[i] / 32768f;
             }
             else if (bits == 32)
             {
                 if (ibuf.Length < count) ibuf = new int[count];
                 Marshal.Copy(data, ibuf, 0, count);
-                for (int f = 0, i = 0; f < frames; f++)
-                {
-                    float s = 0;
-                    for (int c = 0; c < channels; c++) s += ibuf[i++] / 2147483648f;
-                    ring.Push(s * inv);
-                }
+                for (int i = 0; i < count; i++) fbuf[i] = ibuf[i] / 2147483648f;
             }
             else if (bits == 24)
             {
                 int bytes = count * 3;
                 if (bbuf.Length < bytes) bbuf = new byte[bytes];
                 Marshal.Copy(data, bbuf, 0, bytes);
-                for (int f = 0, i = 0; f < frames; f++)
-                {
-                    float s = 0;
-                    for (int c = 0; c < channels; c++, i += 3)
-                        s += ((bbuf[i] << 8 | bbuf[i + 1] << 16 | bbuf[i + 2] << 24) >> 8) / 8388608f;
-                    ring.Push(s * inv);
-                }
+                for (int i = 0, j = 0; i < count; i++, j += 3)
+                    fbuf[i] = ((bbuf[j] << 8 | bbuf[j + 1] << 16 | bbuf[j + 2] << 24) >> 8) / 8388608f;
+            }
+            else return;
+
+            for (int f = 0; f < frames; f++)
+            {
+                int i = f * channels;
+                float l = fbuf[i], r = channels > 1 ? fbuf[i + 1] : l;
+                rings.Push(l, r);
             }
         }
 
@@ -341,17 +326,33 @@ namespace TermVis
         readonly float[] buf;
         readonly int mask;
         int pos;
+        public long Written; // total samples ever pushed
 
         public Ring(int sizePow2) { buf = new float[sizePow2]; mask = sizePow2 - 1; }
         public int Size { get { return buf.Length; } }
 
-        public void Push(float v) { buf[pos] = v; pos = (pos + 1) & mask; }
+        public void Push(float v) { buf[pos] = v; pos = (pos + 1) & mask; Written++; }
 
         // Copies the newest n samples into dst, oldest first.
         public void CopyLatest(float[] dst, int n)
         {
             int start = (pos - n) & mask;
             for (int i = 0; i < n; i++) dst[i] = buf[(start + i) & mask];
+        }
+    }
+
+    // Mono mix for the spectrum modes plus separate left/right for the XY scope.
+    sealed class AudioRings
+    {
+        public readonly Ring Mono, Left, Right;
+
+        public AudioRings(int sizePow2) { Mono = new Ring(sizePow2); Left = new Ring(sizePow2); Right = new Ring(sizePow2); }
+
+        public void Push(float l, float r)
+        {
+            Mono.Push((l + r) * 0.5f);
+            Left.Push(l);
+            Right.Push(r);
         }
     }
 
@@ -566,11 +567,11 @@ namespace TermVis
 
     sealed class Viz
     {
-        static readonly string[] ModeNames = { "Bars", "Mirror", "Wave", "Waterfall", "Rain", "Code", "Radial" };
+        static readonly string[] ModeNames = { "Bars", "Mirror", "Wave", "Waterfall", "Rain", "Code", "Radial", "Scope" };
         static readonly string[] ThemeNames =
         {
             "Fire", "Ocean", "Neon", "Matrix", "Rainbow", "Mono",
-            "Synthwave", "Cyberpunk", "Sunset", "Amber", "Ice", "Toxic", "Blood", "Vapor",
+            "Synthwave", "Cyberpunk", "Sunset", "Amber", "Ice", "Toxic", "Blood", "Vapor", "Phosphor",
         };
         static readonly int[][] ThemeStops =
         {
@@ -588,6 +589,7 @@ namespace TermVis
             new[] { 0x0A2400, 0x4CBB17, 0xC6FF00, 0xF4FF81 },
             new[] { 0x280000, 0x800010, 0xFF2040, 0xFFB0B0 },
             new[] { 0x01CDFE, 0xB967FF, 0xFF71CE, 0xFFFB96 },
+            new[] { 0x002A10, 0x00A040, 0x40FF80, 0xE0FFEA }, // P31 green CRT phosphor
         };
         static readonly string[] GlyphNames = { "Blocks", "ASCII", "Code", "Dots" };
         static readonly string[] ColorByNames = { "Height", "Frequency", "Loudness" };
@@ -604,11 +606,13 @@ namespace TermVis
         public int Mode, Theme, BarWidth, Fps, Glyphs, ColorBy, ColorMode;
         public double GainDb, RangeDb, MinHz, MaxHz, Tilt;
         public float Smooth, PeakGravity, RainSpeed, CodeSpeed, SpinSpeed;
-        public bool AutoGain, Gap, Peaks, UseMic, ShowStatus;
+        public float ScopeDecay, BeamIntensity, ScopeZoom;
+        public bool AutoGain, Gap, Peaks, UseMic, ShowStatus, ScopeGrid, ScopeSmooth;
 
         // ---- runtime state
         readonly Screen scr = new Screen();
-        readonly Ring ring = new Ring(16384);
+        readonly AudioRings rings = new AudioRings(16384);
+        Ring ring { get { return rings.Mono; } }
         readonly Random rng = new Random();
         readonly List<Param> pars;
         IAudioSource cap;
@@ -649,6 +653,12 @@ namespace TermVis
         // radial state
         float spin;
 
+        // scope state: beam energy per braille dot, decaying like phosphor
+        float[] glow = new float[0];
+        float[] scopeL = new float[0], scopeR = new float[0];
+        int glowW, glowH;
+        long scopeRead;
+
         public Viz()
         {
             Defaults();
@@ -674,6 +684,11 @@ namespace TermVis
                 new Param("Rain speed", () => "x" + RainSpeed.ToString("0.00"), d => RainSpeed = (float)ClampD(RainSpeed * Math.Pow(1.25, d), 0.25, 4)),
                 new Param("Code scroll speed", () => "x" + CodeSpeed.ToString("0.00"), d => CodeSpeed = (float)ClampD(CodeSpeed * Math.Pow(1.25, d), 0.25, 4)),
                 new Param("Radial spin", () => SpinSpeed.ToString("+0.0;-0.0;0.0"), d => SpinSpeed = (float)ClampD(Math.Round(SpinSpeed + 0.1 * d, 1), -3, 3)),
+                new Param("Scope zoom", () => "x" + ScopeZoom.ToString("0.00"), d => ScopeZoom = (float)ClampD(ScopeZoom * Math.Pow(1.25, d), 0.25, 8)),
+                new Param("Scope persistence", () => (ScopeDecay * 1000).ToString("0") + " ms", d => ScopeDecay = (float)ClampD(ScopeDecay * Math.Pow(1.4, d), 0.005, 2)),
+                new Param("Beam intensity", () => "x" + BeamIntensity.ToString("0.00"), d => BeamIntensity = (float)ClampD(BeamIntensity * Math.Pow(1.4, d), 0.05, 20)),
+                new Param("Scope smooth beam", () => OnOff(ScopeSmooth), d => ScopeSmooth = !ScopeSmooth),
+                new Param("Scope graticule", () => OnOff(ScopeGrid), d => ScopeGrid = !ScopeGrid),
                 new Param("Frame rate", () => Fps + " fps", d => Fps = FpsSteps[Clamp(Array.IndexOf(FpsSteps, Fps) + d, 0, FpsSteps.Length - 1)]),
                 new Param("Terminal colors", () => ColorModeNames[ColorMode], d => ColorMode = Wrap(ColorMode + d, ColorModeNames.Length)),
                 new Param("Status bar", () => OnOff(ShowStatus), d => ShowStatus = !ShowStatus),
@@ -685,6 +700,7 @@ namespace TermVis
             Mode = 0; Theme = 0; BarWidth = 2; Fps = 60; Glyphs = 0; ColorBy = 0; ColorMode = 0;
             GainDb = 0; RangeDb = 50; MinHz = 30; MaxHz = 16000; Tilt = 3;
             Smooth = 0.12f; PeakGravity = 1.5f; RainSpeed = 1; CodeSpeed = 1; SpinSpeed = 0.3f;
+            ScopeDecay = 0.06f; BeamIntensity = 1; ScopeZoom = 1; ScopeGrid = true; ScopeSmooth = true;
             AutoGain = true; Gap = true; Peaks = true; UseMic = false; ShowStatus = true;
         }
 
@@ -754,6 +770,11 @@ namespace TermVis
                     "rainspeed=" + RainSpeed.ToString(inv),
                     "codespeed=" + CodeSpeed.ToString(inv),
                     "spin=" + SpinSpeed.ToString(inv),
+                    "scopezoom=" + ScopeZoom.ToString(inv),
+                    "scopedecay=" + ScopeDecay.ToString(inv),
+                    "beam=" + BeamIntensity.ToString(inv),
+                    "scopesmooth=" + ScopeSmooth,
+                    "scopegrid=" + ScopeGrid,
                     "status=" + ShowStatus,
                     "fps=" + Fps,
                 }) + Environment.NewLine;
@@ -788,6 +809,11 @@ namespace TermVis
                 case "rainspeed": if (ok) RainSpeed = (float)ClampD(d, 0.25, 4); return ok;
                 case "codespeed": if (ok) CodeSpeed = (float)ClampD(d, 0.25, 4); return ok;
                 case "spin": if (ok) SpinSpeed = (float)ClampD(d, -3, 3); return ok;
+                case "scopezoom": if (ok) ScopeZoom = (float)ClampD(d, 0.25, 8); return ok;
+                case "scopedecay": if (ok) ScopeDecay = (float)ClampD(d, 0.005, 2); return ok;
+                case "beam": if (ok) BeamIntensity = (float)ClampD(d, 0.05, 20); return ok;
+                case "scopesmooth": ScopeSmooth = b; return true;
+                case "scopegrid": ScopeGrid = b; return true;
                 case "status": ShowStatus = b; return true;
                 case "fps": if (ok) Fps = Clamp((int)d, 10, 144); return ok;
             }
@@ -962,7 +988,7 @@ namespace TermVis
             try
             {
                 // Loopback delivers nothing while the system is silent, so feed zeros to let the display fall.
-                if (cap.Read(ring) > 0) lastData = now;
+                if (cap.Read(rings) > 0) lastData = now;
                 else if (now - lastData > 0.1) PushSilence(dt);
             }
             catch (Exception)
@@ -975,7 +1001,7 @@ namespace TermVis
         void PushSilence(float dt)
         {
             int n = Math.Min(ring.Size, (int)(dt * sampleRate));
-            for (int i = 0; i < n; i++) ring.Push(0f);
+            for (int i = 0; i < n; i++) rings.Push(0f, 0f);
         }
 
         void Analyze(float dt)
@@ -1134,6 +1160,7 @@ namespace TermVis
                     case 4: DrawRain(vh, dt); break;
                     case 5: DrawCode(vh, dt); break;
                     case 6: DrawRadial(vh, dt); break;
+                    case 7: DrawScope(vh, dt); break;
                 }
             }
             if (ShowStatus) DrawStatus(h - 1);
@@ -1462,6 +1489,118 @@ namespace TermVis
             braille.Draw(scr, t => Pal(t));
         }
 
+        // XY oscilloscope, as used for oscilloscope music: the left channel drives the beam horizontally and
+        // the right channel vertically. Every sample is traced, and the beam deposits a fixed amount of energy
+        // per unit of time, so slow strokes glow bright, fast jumps stay faint, and the phosphor fades out.
+        void DrawScope(int vh, float dt)
+        {
+            int pw = scr.W * 2, ph = vh * 4;
+            if (glowW != pw || glowH != ph) { glow = new float[pw * ph]; glowW = pw; glowH = ph; }
+
+            float fade = (float)Math.Exp(-dt / ScopeDecay);
+            for (int i = 0; i < glow.Length; i++) glow[i] *= fade;
+
+            // Samples that arrived since the last frame, plus history for the spline on either side.
+            long written = rings.Left.Written;
+            int n = (int)Math.Min(written - scopeRead, sampleRate / 10);
+            if (scopeRead == 0) n = Math.Min(n, (int)(sampleRate * dt));
+            scopeRead = written;
+            int len = n + 3;
+            if (scopeL.Length < len) { scopeL = new float[len]; scopeR = new float[len]; }
+            rings.Left.CopyLatest(scopeL, len);
+            rings.Right.CopyLatest(scopeR, len);
+
+            // Square screen centered in the window; braille dots are close to square, so no aspect correction.
+            float half = (Math.Min(pw, ph) - 2) / 2f;
+            float scale = half * ScopeZoom * (float)Math.Pow(10, GainDb / 20.0);
+            float cx = pw / 2f, cy = ph / 2f;
+            int sub = ScopeSmooth ? 4 : 1; // upsampling stands in for the smooth reconstruction of a real DAC
+            float energy = 0.1f * BeamIntensity / sub;
+
+            // The newest sample has no successor yet, so the trace runs one sample behind and ends at index n + 1.
+            float px = cx + scopeL[1] * scale, py = cy - scopeR[1] * scale;
+            for (int k = 1; k <= n; k++)
+                for (int s = 1; s <= sub; s++)
+                {
+                    float l, r;
+                    if (sub == 1) { l = scopeL[k + 1]; r = scopeR[k + 1]; }
+                    else
+                    {
+                        float t = (float)s / sub;
+                        l = CatmullRom(scopeL[k - 1], scopeL[k], scopeL[k + 1], scopeL[k + 2], t);
+                        r = CatmullRom(scopeR[k - 1], scopeR[k], scopeR[k + 1], scopeR[k + 2], t);
+                    }
+                    float x = cx + l * scale, y = cy - r * scale;
+                    Stroke(px, py, x, y, energy);
+                    px = x; py = y;
+                }
+
+            if (ScopeGrid) DrawGraticule(cx, cy, half);
+
+            for (int row = 0; row < vh; row++)
+                for (int col = 0; col < scr.W; col++)
+                {
+                    int bits = 0;
+                    float best = 0;
+                    for (int sy = 0; sy < 4; sy++)
+                        for (int sx = 0; sx < 2; sx++)
+                        {
+                            float g = glow[(row * 4 + sy) * glowW + col * 2 + sx];
+                            if (g <= 0) continue;
+                            float b = 1f - (float)Math.Exp(-g); // phosphor saturates rather than clipping
+                            if (b < 0.04f) continue;
+                            bits |= sy < 3 ? (sx == 0 ? 1 << sy : 8 << sy) : (sx == 0 ? 0x40 : 0x80);
+                            if (b > best) best = b;
+                        }
+                    if (bits != 0)
+                        scr.Set(col, row, (char)(0x2800 + bits), Scale(Pal(0.2f + 0.8f * best), 0.4 + 0.6 * best), -1);
+                }
+        }
+
+        // Spreads one beam segment's energy evenly along its length, so energy per dot falls as speed rises.
+        void Stroke(float x0, float y0, float x1, float y1, float e)
+        {
+            float dx = x1 - x0, dy = y1 - y0;
+            int steps = Math.Min(4 * (glowW + glowH), (int)Math.Max(Math.Abs(dx), Math.Abs(dy)) + 1);
+            float per = e / steps;
+            for (int i = 0; i < steps; i++)
+            {
+                float f = (float)i / steps;
+                int x = (int)Math.Floor(x0 + dx * f + 0.5f), y = (int)Math.Floor(y0 + dy * f + 0.5f);
+                if ((uint)x < (uint)glowW && (uint)y < (uint)glowH) glow[y * glowW + x] += per;
+            }
+        }
+
+        static float CatmullRom(float p0, float p1, float p2, float p3, float t)
+        {
+            float t2 = t * t, t3 = t2 * t;
+            return 0.5f * (2 * p1 + (p2 - p0) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (3 * p1 - p0 - 3 * p2 + p3) * t3);
+        }
+
+        // 8x8 division graticule over the square screen, dimmer than any trace.
+        void DrawGraticule(float cx, float cy, float half)
+        {
+            int dim = Lerp(0x1C1C1C, Pal(0.4f), 0.2), axis = Lerp(0x2A2A2A, Pal(0.5f), 0.3);
+            int left = (int)((cx - half) / 2), right = (int)((cx + half) / 2);
+            int top = (int)((cy - half) / 4), bottom = Math.Min(glowH / 4 - 1, (int)((cy + half) / 4));
+            var cols = new int[9];
+            var rows = new int[9];
+            for (int i = 0; i <= 8; i++)
+            {
+                cols[i] = Math.Min(scr.W - 1, (int)((cx - half + i * half / 4) / 2));
+                rows[i] = Math.Min(bottom, (int)((cy - half + i * half / 4) / 4));
+            }
+            for (int i = 0; i <= 8; i++)
+            {
+                int c = i == 4 ? axis : dim;
+                for (int y = top; y <= bottom; y++) scr.Set(cols[i], y, '·', c, -1);
+                for (int x = left; x <= right; x += 2) scr.Set(x, rows[i], '·', c, -1);
+            }
+            for (int i = 0; i <= 8; i++)
+                for (int j = 0; j <= 8; j++)
+                    scr.Set(cols[i], rows[j], '+', i == 4 || j == 4 ? axis : dim, -1);
+        }
+
         // ---------------- overlays
 
         void DrawStatus(int y)
@@ -1494,8 +1633,8 @@ namespace TermVis
             {
                 "DMZ TermVis controls",
                 "",
-                "M / 1-7      mode: bars, mirror, wave, waterfall,",
-                "             rain, code, radial",
+                "M / 1-8      mode: bars, mirror, wave, waterfall,",
+                "             rain, code, radial, scope (XY)",
                 "C / Shift+C  next / previous color theme",
                 "K            glyph style: blocks, ascii, code, dots",
                 "V            color by: height, frequency, loudness",
@@ -1578,15 +1717,15 @@ namespace TermVis
                 string a = args[i].TrimStart('-', '/').ToLowerInvariant();
                 if (a == "h" || a == "help" || a == "?")
                 {
-                    Console.WriteLine("DMZ TermVis 1.0 - terminal audio visualizer");
+                    Console.WriteLine("DMZ TermVis 1.1 - terminal audio visualizer");
                     Console.WriteLine();
                     Console.WriteLine("Usage: termvis [options]");
                     Console.WriteLine("  --mic                 Windows: visualize the microphone instead of system audio");
                     Console.WriteLine("  --system              Windows: visualize system audio (default)");
                     Console.WriteLine("                        (macOS always uses the default input device)");
-                    Console.WriteLine("  --mode <name|1-7>     bars, mirror, wave, waterfall, rain, code, radial");
+                    Console.WriteLine("  --mode <name|1-8>     bars, mirror, wave, waterfall, rain, code, radial, scope");
                     Console.WriteLine("  --theme <name>        fire, ocean, neon, matrix, rainbow, mono, synthwave,");
-                    Console.WriteLine("                        cyberpunk, sunset, amber, ice, toxic, blood, vapor");
+                    Console.WriteLine("                        cyberpunk, sunset, amber, ice, toxic, blood, vapor, phosphor");
                     Console.WriteLine("  --glyphs <name>       blocks, ascii, code, dots");
                     Console.WriteLine("  --colorby <name>      height, frequency, loudness");
                     Console.WriteLine("  --gain <dB>           extra gain, -30..30");

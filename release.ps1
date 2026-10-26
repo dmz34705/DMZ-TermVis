@@ -3,7 +3,7 @@
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 
-$version = '1.0'
+$version = '1.1'
 $dist = Join-Path $PSScriptRoot 'dist'
 if (Test-Path $dist) { Remove-Item $dist -Recurse -Force }
 New-Item -ItemType Directory $dist | Out-Null
