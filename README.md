@@ -29,20 +29,63 @@ It looks best in **Windows Terminal**, the default on Windows 11. If Windows Sma
 
 ### macOS
 
-1. Double-click the `.tar.gz` to extract it.
-2. Open **Terminal**, go to the extracted folder, and run the one-time setup:
+TermVis isn't registered with Apple, so macOS needs a one-time setup before it will run it. Do these steps in **Terminal**, not by double-clicking files in Finder.
+
+1. **Extract the download.** Double-click the `.tar.gz` file in your Downloads folder. This creates a folder like `DMZ-TermVis-1.0-macos-arm64`.
+
+2. **Open Terminal** (Applications → Utilities → Terminal, or press ⌘ Space and type *Terminal*).
+
+3. **Go to the folder.** Use `macos-intel-x64` instead if you downloaded the Intel version:
    ```sh
    cd ~/Downloads/DMZ-TermVis-1.0-macos-arm64
+   ```
+
+4. **Run the one-time setup:**
+   ```sh
    sh setup-mac.sh
    ```
-   The setup removes the "downloaded from the internet" block and applies a local signature, which Apple Silicon Macs require.
-3. Start it:
+   It should finish with **"DMZ TermVis is ready."** The script does two things macOS requires:
+   - It removes the "downloaded from the internet" quarantine flag, which causes the *"cannot verify it is free of malware"* warning.
+   - It signs the program locally. Apple Silicon Macs (M1 and later) won't run unsigned programs at all.
+
+5. **Start TermVis:**
    ```sh
    ./termvis
    ```
-4. The first time, macOS asks whether Terminal may use the microphone. Click **Allow**. If you missed the prompt, turn it on in **System Settings → Privacy & Security → Microphone**.
 
-It looks best in a terminal with 24-bit color, such as [iTerm2](https://iterm2.com), Ghostty, WezTerm or Terminal on recent macOS. In other terminals TermVis switches to 256 colors automatically. You can force either one with `--colors 24-bit` or `--colors 256`.
+6. **Allow microphone access.** The first time, macOS asks whether Terminal may use the microphone. Click **Allow**. TermVis needs this to hear any audio, including system audio through BlackHole.
+
+Next time, open Terminal and run `cd ~/Downloads/DMZ-TermVis-1.0-macos-arm64` and then `./termvis`. You can move the folder anywhere you like and `cd` there instead.
+
+#### macOS troubleshooting
+
+**"termvis" can't be opened because Apple cannot verify it is free of malware**
+
+This happens if you double-click `termvis` before running the setup. Either run `sh setup-mac.sh` as above, or allow it in System Settings:
+1. Click **Done** on the warning.
+2. Open **System Settings → Privacy & Security**.
+3. Scroll down to **Security**. Next to *"termvis" was blocked to protect your Mac*, click **Open Anyway** and enter your password.
+4. Run `./termvis` again and click **Open**.
+
+The **Open Anyway** button only appears for about an hour after the blocked attempt. If it's missing, try opening `termvis` again first. On Apple Silicon Macs you still need to run `sh setup-mac.sh` afterwards to sign the program.
+
+**`zsh: killed ./termvis`**
+
+The program isn't signed yet. This is common on Apple Silicon Macs. Run `sh setup-mac.sh` in the TermVis folder, then try again.
+
+**The setup says "Signing failed"**
+
+Install Apple's command-line tools with `xcode-select --install`, then run `sh setup-mac.sh` again.
+
+**It runs, but nothing moves**
+
+Terminal probably doesn't have microphone access. Open **System Settings → Privacy & Security → Microphone**, turn on **Terminal** (or the terminal app you use), then quit and reopen it. Also check that sound is reaching the input device: check **System Settings → Sound → Input** and watch the input level meter.
+
+**Colors look wrong or blocky**
+
+Your terminal may not support 24-bit color. Run `./termvis --colors 256`, or change **Terminal colors** in the Tab settings panel.
+
+It looks best in a terminal with 24-bit color, such as [iTerm2](https://iterm2.com), Ghostty, WezTerm or Terminal on recent macOS. In other terminals TermVis switches to 256 colors automatically.
 
 ## Visualizing system audio on macOS
 
