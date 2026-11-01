@@ -15,9 +15,9 @@ Get the archive for your system from the [Releases](../../releases) page:
 
 | System | File |
 |---|---|
-| Windows 10/11 (64-bit) | `DMZ-TermVis-1.1-windows-x64.zip` |
-| Mac with Apple Silicon (M1 and later) | `DMZ-TermVis-1.1-macos-arm64.tar.gz` |
-| Mac with Intel processor | `DMZ-TermVis-1.1-macos-intel-x64.tar.gz` |
+| Windows 10/11 (64-bit) | `DMZ-TermVis-1.2-windows-x64.zip` |
+| Mac with Apple Silicon (M1 and later) | `DMZ-TermVis-1.2-macos-arm64.tar.gz` |
+| Mac with Intel processor | `DMZ-TermVis-1.2-macos-intel-x64.tar.gz` |
 
 ### Windows
 
@@ -31,13 +31,13 @@ It looks best in **Windows Terminal**, the default on Windows 11. If Windows Sma
 
 TermVis isn't registered with Apple, so macOS needs a one-time setup before it will run it. Do these steps in **Terminal**, not by double-clicking files in Finder.
 
-1. **Extract the download.** Double-click the `.tar.gz` file in your Downloads folder. This creates a folder like `DMZ-TermVis-1.1-macos-arm64`.
+1. **Extract the download.** Double-click the `.tar.gz` file in your Downloads folder. This creates a folder like `DMZ-TermVis-1.2-macos-arm64`.
 
 2. **Open Terminal** (Applications → Utilities → Terminal, or press ⌘ Space and type *Terminal*).
 
 3. **Go to the folder.** Use `macos-intel-x64` instead if you downloaded the Intel version:
    ```sh
-   cd ~/Downloads/DMZ-TermVis-1.1-macos-arm64
+   cd ~/Downloads/DMZ-TermVis-1.2-macos-arm64
    ```
 
 4. **Run the one-time setup:**
@@ -55,7 +55,7 @@ TermVis isn't registered with Apple, so macOS needs a one-time setup before it w
 
 6. **Allow microphone access.** The first time, macOS asks whether Terminal may use the microphone. Click **Allow**. TermVis needs this to hear any audio, including system audio through BlackHole.
 
-Next time, open Terminal and run `cd ~/Downloads/DMZ-TermVis-1.1-macos-arm64` and then `./termvis`. You can move the folder anywhere you like and `cd` there instead.
+Next time, open Terminal and run `cd ~/Downloads/DMZ-TermVis-1.2-macos-arm64` and then `./termvis`. You can move the folder anywhere you like and `cd` there instead.
 
 #### macOS troubleshooting
 

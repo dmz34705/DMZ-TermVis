@@ -1906,7 +1906,7 @@ namespace TermVis
                 string a = args[i].TrimStart('-', '/').ToLowerInvariant();
                 if (a == "h" || a == "help" || a == "?")
                 {
-                    Console.WriteLine("DMZ TermVis 1.1 - terminal audio visualizer");
+                    Console.WriteLine("DMZ TermVis 1.2 - terminal audio visualizer");
                     Console.WriteLine();
                     Console.WriteLine("Usage: termvis [options]");
                     Console.WriteLine("  --mic                 Windows: visualize the microphone instead of system audio");
