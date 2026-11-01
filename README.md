@@ -1,8 +1,8 @@
-﻿# DMZ TermVis
+# DMZ TermVis
 
 A real-time audio visualizer that runs entirely in your terminal. It turns music into animated text using colored block characters, braille dots and scrolling code. It's a single standalone program with nothing to install.
 
-- **8 modes:** Bars, Mirror, Wave (oscilloscope), Waterfall (spectrogram), Rain (falling code), Code (scrolling source code lit up by the spectrum), Radial, and **Scope**, a true XY oscilloscope for [oscilloscope music](#oscilloscope-music-scope-mode)
+- **12 modes:** Bars, Mirror, Wave (oscilloscope), Waterfall (spectrogram), Rain (falling code), Code (scrolling source code lit up by the spectrum), Radial, and **Scope**, a true XY oscilloscope for [oscilloscope music](#oscilloscope-music-scope-mode), plus Kaleido, Tendrils, Cells, and Terrain
 - **15 color themes:** Fire, Ocean, Neon, Matrix, Rainbow, Mono, Synthwave, Cyberpunk, Sunset, Amber, Ice, Toxic, Blood, Vapor, Phosphor
 - **4 glyph styles** for bars: Blocks, ASCII, Code, Dots
 - A **settings panel** with 27 adjustable parameters, saved automatically so it reopens where you left off
@@ -131,7 +131,10 @@ Press **H** at any time to see these on screen, or **Tab** to open the settings 
 
 | Key | Action |
 |---|---|
-| **M** / **1–8** | Change mode |
+| **M** / **Shift+M** | Next / previous mode |
+| **1–8**, **9**, **0**, **-**, **=** | Classic modes, Kaleido, Tendrils, Cells, Terrain |
+| **Space** | Play / pause music |
+| **N** / **P** | Next / previous track |
 | **C** / **Shift+C** | Next / previous color theme |
 | **K** | Glyph style: blocks, ascii, code, dots |
 | **V** | Color by: height, frequency, loudness |
@@ -140,7 +143,7 @@ Press **H** at any time to see these on screen, or **Tab** to open the settings 
 | **A** | Auto-gain on/off |
 | **← / →** | Bar width |
 | **G** | Gaps between bars |
-| **P** | Peak markers |
+| **Shift+P** | Peak markers |
 | **[ / ]** | Less / more smoothing |
 | **Tab** or **E** | Settings panel (↑↓ select, ←→ change) |
 | **B** | Status bar on/off |
@@ -151,13 +154,33 @@ The settings panel also covers dynamic range, low and high frequency cutoffs, tr
 
 Settings are saved to `termvis.ini` next to the program about a second after any change, so closing the window keeps them. You can also edit that file by hand.
 
+## Playback controls
+
+TermVis controls your external music player; it does not load or play audio files itself.
+
+- **Windows:** sends standard media keys to the player registered with Windows, including supported browser players.
+- **macOS:** controls running Spotify or Music apps. It prefers a currently playing app, then the last controlled app, then Spotify if both are paused. Open your player first. macOS may ask you to allow your terminal to control it under **Privacy & Security → Automation**. Browser playback is not controlled on macOS.
+- Commands run in the background. A short message reports the selected player or an error. Playback controls also work with the settings panel open.
+
+## Experimental visualizations
+
+| Mode | Shortcut | Motion |
+|---|---|---|
+| Kaleido | **9** | Eightfold interference tunnel; bass drives travel, mids warp the folds, highs add ripples |
+| Tendrils | **0** | A colony of curling roots or jellyfish limbs, with individual frequency bands stretching each limb |
+| Cells | **-** | Drifting liquid membranes that fuse and separate, with spectral energy changing their size |
+| Terrain | **=** | A moving topographic ocean; bass raises hills and treble ruffles the ridges |
+
+All modes use the current color theme and gain/smoothing settings. Try Neon or Vapor with Kaleido, Ocean with Tendrils, Toxic with Cells, and Phosphor with Terrain. They retain gentle motion in silence.
+
 ## Command-line options
 
 ```
 termvis [options]
   --mic                 Windows: visualize the microphone instead of system audio
   --system              Windows: visualize system audio (default)
-  --mode <name|1-8>     bars, mirror, wave, waterfall, rain, code, radial, scope
+  --mode <name|1-12>    bars, mirror, wave, waterfall, rain, code, radial, scope,
+                        kaleido, tendrils, cells, terrain
   --theme <name>        fire, ocean, neon, matrix, rainbow, mono, synthwave,
                         cyberpunk, sunset, amber, ice, toxic, blood, vapor, phosphor
   --glyphs <name>       blocks, ascii, code, dots
@@ -176,6 +199,14 @@ termvis [options]
 ## Building from source
 
 Everything is in one file, `termvis.cs`.
+
+For local development with the .NET 8 SDK:
+
+```sh
+dotnet run --project TermVis.csproj -- --mode kaleido --theme neon
+```
+
+The original Windows framework-compiler build remains supported. See `tests/README.md` for renderer and media-routing checks.
 
 - **Windows, quick:** `run.bat` compiles and runs it in memory using the C# compiler built into Windows. You don't need an SDK. `build.bat` makes a `termvis.exe` the same way.
 - **Release builds:** install the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) and Python 3, then run `release.ps1`. It writes self-contained Windows and macOS archives to `dist/`.

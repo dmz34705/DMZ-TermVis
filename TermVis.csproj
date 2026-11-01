@@ -7,6 +7,7 @@
     <AssemblyName>termvis</AssemblyName>
     <RootNamespace>TermVis</RootNamespace>
     <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <Nullable>disable</Nullable>
     <Product>DMZ TermVis</Product>
     <Version>1.1.0</Version>
@@ -19,4 +20,7 @@
     <NoWarn>$(NoWarn);CA1416</NoWarn>
   </PropertyGroup>
 
+  <ItemGroup>
+    <Compile Include="termvis.cs" />
+  </ItemGroup>
 </Project>

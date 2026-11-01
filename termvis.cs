@@ -21,6 +21,80 @@ namespace TermVis
         public static readonly bool IsMac = !IsWindows && Directory.Exists("/System/Library/Frameworks/AudioToolbox.framework");
     }
 
+    // Commands run off the rendering thread; at most one request is in flight.
+    sealed class MediaControls
+    {
+        [DllImport("user32.dll")] static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
+        int busy;
+        string lastPlayer = "";
+        public volatile string Message = "";
+
+        internal static string BuildMacScript(int action, string lastPlayer)
+        {
+            string command = action == 0 ? "playpause" : action == 1 ? "nextTrack" : "previousTrack";
+            return "(function(){var names=['Spotify','Music'], live=[];" +
+                            "for(var i=0;i<names.length;i++){try{var a=Application(names[i]);if(a.running())live.push({name:names[i],app:a});}catch(e){}}" +
+                            "var target=null;for(var i=0;i<live.length;i++){if(live[i].app.playerState()==='playing'){target=live[i];break;}}" +
+                            "if(!target){for(var i=0;i<live.length;i++){if(live[i].name==='" + lastPlayer + "')target=live[i];}}" +
+                            "if(!target && live.length)target=live[0];" +
+                            "if(target){target.app." + command + "();return target.name;}return 'No player';})()";
+        }
+
+        public void Send(int action) // 0 toggle, 1 next, 2 previous
+        {
+            if (Interlocked.CompareExchange(ref busy, 1, 0) != 0) return;
+            Message = "Sending player command...";
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                try
+                {
+                    if (Platform.IsWindows)
+                    {
+                        byte key = (byte)(action == 0 ? 0xB3 : action == 1 ? 0xB0 : 0xB1);
+                        keybd_event(key, 0, 1, UIntPtr.Zero);
+                        keybd_event(key, 0, 3, UIntPtr.Zero);
+                        Message = "Media key sent";
+                    }
+                    else if (Platform.IsMac)
+                    {
+                        // JXA resolves dictionaries only for installed, running applications.
+                        string script = BuildMacScript(action, lastPlayer);
+                        var info = new ProcessStartInfo("/usr/bin/osascript", "-l JavaScript")
+                        {
+                            UseShellExecute = false, RedirectStandardInput = true,
+                            RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true,
+                        };
+                        using (var process = Process.Start(info))
+                        {
+                            process.StandardInput.Write(script);
+                            process.StandardInput.Close();
+                            if (!process.WaitForExit(8000))
+                            {
+                                process.Kill();
+                                Message = "Player timed out; check macOS Automation permissions";
+                            }
+                            else if (process.ExitCode != 0)
+                                Message = "Player control failed; check macOS Automation permissions";
+                            else
+                            {
+                                string player = process.StandardOutput.ReadToEnd().Trim();
+                                if (player == "Spotify" || player == "Music")
+                                {
+                                    lastPlayer = player;
+                                    Message = player + ": " + (action == 0 ? "play/pause" : action == 1 ? "next track" : "previous track");
+                                }
+                                else Message = "Open Spotify or Music to control playback";
+                            }
+                        }
+                    }
+                    else Message = "Playback controls require Windows or macOS";
+                }
+                catch (Exception) { Message = "Could not send player command"; }
+                finally { Interlocked.Exchange(ref busy, 0); }
+            });
+        }
+    }
+
     interface IAudioSource : IDisposable
     {
         int SampleRate { get; }
@@ -567,7 +641,7 @@ namespace TermVis
 
     sealed class Viz
     {
-        static readonly string[] ModeNames = { "Bars", "Mirror", "Wave", "Waterfall", "Rain", "Code", "Radial", "Scope" };
+        static readonly string[] ModeNames = { "Bars", "Mirror", "Wave", "Waterfall", "Rain", "Code", "Radial", "Scope", "Kaleido", "Tendrils", "Cells", "Terrain" };
         static readonly string[] ThemeNames =
         {
             "Fire", "Ocean", "Neon", "Matrix", "Rainbow", "Mono",
@@ -652,6 +726,11 @@ namespace TermVis
 
         // radial state
         float spin;
+        double dreamTime;
+        readonly Smoother dreamSmooth = new Smoother();
+        readonly MediaControls media = new MediaControls();
+        float mediaNotice;
+
 
         // scope state: beam energy per braille dot, decaying like phosphor
         float[] glow = new float[0];
@@ -901,7 +980,9 @@ namespace TermVis
                 {
                     case ConsoleKey.Q: case ConsoleKey.Escape: quit = true; break;
                     case ConsoleKey.Tab: case ConsoleKey.E: showSettings = !showSettings; showHelp = false; break;
-                    case ConsoleKey.M: Mode = Wrap(Mode + 1, ModeNames.Length); break;
+                    case ConsoleKey.M: Mode = Wrap(Mode + ((k.Modifiers & ConsoleModifiers.Shift) != 0 ? -1 : 1), ModeNames.Length); break;
+                    case ConsoleKey.Spacebar: media.Send(0); mediaNotice = 10; break;
+                    case ConsoleKey.N: media.Send(1); mediaNotice = 10; break;
                     case ConsoleKey.C:
                         bool back = (k.Modifiers & ConsoleModifiers.Shift) != 0 || k.KeyChar == 'C';
                         Theme = Wrap(Theme + (back ? -1 : 1), ThemeNames.Length); BuildPalette();
@@ -915,7 +996,10 @@ namespace TermVis
                     case ConsoleKey.RightArrow: BarWidth = Math.Min(8, BarWidth + 1); break;
                     case ConsoleKey.LeftArrow: BarWidth = Math.Max(1, BarWidth - 1); break;
                     case ConsoleKey.G: Gap = !Gap; break;
-                    case ConsoleKey.P: Peaks = !Peaks; break;
+                    case ConsoleKey.P:
+                        if ((k.Modifiers & ConsoleModifiers.Shift) != 0) Peaks = !Peaks;
+                        else { media.Send(2); mediaNotice = 10; }
+                        break;
                     case ConsoleKey.B: ShowStatus = !ShowStatus; break;
                     case ConsoleKey.H: showHelp = !showHelp; showSettings = false; break;
                     case ConsoleKey.R:
@@ -925,7 +1009,10 @@ namespace TermVis
                         break;
                     default:
                         // matched by character since [ and ] map to different ConsoleKeys across platforms
-                        if (k.KeyChar >= '1' && k.KeyChar <= '0' + ModeNames.Length) Mode = k.KeyChar - '1';
+                        if (k.KeyChar >= '1' && k.KeyChar <= '9') Mode = k.KeyChar - '1';
+                        else if (k.KeyChar == '0') Mode = 9;
+                        else if (k.KeyChar == '-') Mode = 10;
+                        else if (k.KeyChar == '=') Mode = 11;
                         else if (k.KeyChar == '[') Smooth = Math.Max(0.02f, Smooth / 1.25f);
                         else if (k.KeyChar == ']') Smooth = Math.Min(1.0f, Smooth * 1.25f);
                         break;
@@ -1144,6 +1231,7 @@ namespace TermVis
         void Render(float dt)
         {
             frame++;
+            mediaNotice = Math.Max(0, mediaNotice - dt);
             int w = Console.WindowWidth, h = Console.WindowHeight;
             if (w != scr.W || h != scr.H) scr.Resize(w, h);
             scr.TrueColor = ColorMode == 1 || (ColorMode == 0 && AutoTrueColor);
@@ -1161,9 +1249,11 @@ namespace TermVis
                     case 5: DrawCode(vh, dt); break;
                     case 6: DrawRadial(vh, dt); break;
                     case 7: DrawScope(vh, dt); break;
+                    default: DrawDream(vh, dt); break;
                 }
             }
             if (ShowStatus) DrawStatus(h - 1);
+            if (mediaNotice > 0) scr.Text(0, Math.Max(0, h - (ShowStatus ? 2 : 1)), " " + media.Message + " ", 0xFFFFFF, 0x242438);
             if (showHelp) DrawHelp();
             if (showSettings) DrawSettings();
             scr.Flush();
@@ -1489,6 +1579,103 @@ namespace TermVis
             braille.Draw(scr, t => Pal(t));
         }
 
+        // Four different audio-driven geometries. Work is bounded by terminal size.
+        void DrawDream(int vh, float dt)
+        {
+            Bands(48);
+            dreamSmooth.Apply(raw, 48, dt, 0.035f, Smooth);
+            float bass = Average(dreamSmooth.V, 0, 8);
+            float mid = Average(dreamSmooth.V, 8, 22);
+            float treble = Average(dreamSmooth.V, 30, 18);
+            dreamTime += dt * (0.3 + bass * 1.4);
+            double t = dreamTime;
+            if (Mode == 8 || Mode == 10)
+            {
+                // Half-block pixels retain color detail without doubling terminal output.
+                double scale = Math.Max(1, Math.Min(scr.W, vh * 2));
+                for (int y = 0; y < vh; y++)
+                    for (int x = 0; x < scr.W; x++)
+                    {
+                        int top = DreamPixel((2 * x - scr.W) / scale, (4 * y - vh * 2) / scale, t, bass, mid, treble);
+                        int bottom = DreamPixel((2 * x - scr.W) / scale, (4 * y + 2 - vh * 2) / scale, t, bass, mid, treble);
+                        scr.Set(x, y, '▀', top, bottom);
+                    }
+                return;
+            }
+            braille.Begin(scr.W, vh);
+            float pw = scr.W * 2, ph = vh * 4, size = Math.Min(pw, ph) * 0.42f;
+            if (Mode == 9)
+            {
+                // A drifting colony of jellyfish/roots: each limb follows its own band.
+                for (int limb = 0; limb < 36; limb++)
+                {
+                    float energy = dreamSmooth.V[limb];
+                    double angle = limb * Math.PI * 2 / 36 + t * 0.12;
+                    float ox = pw / 2, oy = ph / 2;
+                    for (int j = 1; j <= 80; j++)
+                    {
+                        double u = j / 80.0;
+                        double bend = angle + Math.Sin(u * 7 - t * 2 + limb * 0.7) * u * (0.35 + mid) + Math.Sin(t + u * 3) * 0.2;
+                        double r = size * u * (0.55 + energy * 0.65);
+                        float nx = pw / 2 + (float)(Math.Cos(bend) * r);
+                        float ny = ph / 2 + (float)(Math.Sin(bend) * r);
+                        braille.Line(ox, oy, nx, ny, 0.2f + energy * 0.6f, (float)(0.2 + energy * 0.55 + u * 0.2));
+                        ox = nx; oy = ny;
+                    }
+                }
+            }
+            else
+            {
+                // A perspective topographic ocean: bass lifts hills, highs ruffle ridges.
+                for (int row = 0; row < 30; row++)
+                {
+                    double depth = row / 29.0, perspective = 0.15 + depth * depth * 0.85;
+                    float ox = 0, oy = 0;
+                    for (int col = 0; col <= 100; col++)
+                    {
+                        double u = col / 50.0 - 1, z = row * 0.32 + t;
+                        double wave = Math.Sin(u * 5 + z) * Math.Cos(z * 0.7 + u * 2) * (0.25 + bass);
+                        wave += Math.Sin(u * 17 - z * 2) * treble * 0.22;
+                        wave += dreamSmooth.V[Math.Min(47, col * 48 / 101)] * mid * 0.6;
+                        float nx = pw / 2 + (float)(u * pw * 0.75 * perspective);
+                        float ny = (float)(ph * (0.15 + depth * 0.8) - wave * ph * 0.23 * perspective);
+                        float color = (float)ClampD(0.2 + depth * 0.35 + wave * 0.3 + mid * 0.2, 0, 1);
+                        if (col > 0) braille.Line(ox, oy, nx, ny, color, color);
+                        ox = nx; oy = ny;
+                    }
+                }
+            }
+            braille.Draw(scr, v => Pal(v));
+        }
+
+        int DreamPixel(double x, double y, double t, float bass, float mid, float treble)
+        {
+            double value;
+            if (Mode == 8)
+            {
+                double r = Math.Sqrt(x * x + y * y), angle = Math.Atan2(y, x);
+                double fold = Math.Cos(angle * 8 + t * 0.6);
+                double tunnel = Math.Log(0.12 + r) * (7 + bass * 5) - t * 4;
+                value = 0.5 + 0.5 * Math.Sin(tunnel + fold * (2 + mid * 4) + Math.Sin(r * 13 - t) * treble * 3);
+                value = Math.Pow(value, 1.5) * (0.45 + mid * 0.55);
+            }
+            else
+            {
+                double field = 0;
+                for (int i = 0; i < 7; i++)
+                {
+                    double cx = Math.Sin(t * (0.4 + i * 0.03) + i * 2.4) * 0.75;
+                    double cy = Math.Cos(t * (0.3 + i * 0.04) + i * 1.7) * 0.75;
+                    double dx = x - cx, dy = y - cy;
+                    field += (0.045 + dreamSmooth.V[i * 6] * 0.08) / (dx * dx + dy * dy + 0.025);
+                }
+                // Interference contours make membranes ripple and fuse like living cells.
+                value = (0.5 + 0.5 * Math.Sin(field * (2 + mid) - t)) * Math.Min(1, field * 0.65);
+                value = Math.Pow(value, 2 - treble) * (0.45 + bass * 0.55);
+            }
+            return Pal((float)value);
+        }
+
         // XY oscilloscope, as used for oscilloscope music: the left channel drives the beam horizontally and
         // the right channel vertically. Every sample is traced, and the beam deposits a fixed amount of energy
         // per unit of time, so slow strokes glow bright, fast jumps stay faint, and the phosphor fades out.
@@ -1608,7 +1795,7 @@ namespace TermVis
             string gain = GainDb.ToString("+0;-0;0") + " dB" + (AutoGain ? " auto" : "");
             string src = SourceName + (srcError != null ? " (" + srcError + ")" : "");
             string s = " DMZ TermVis | " + ModeNames[Mode] + " | " + ThemeNames[Theme] + " | " + GlyphNames[Glyphs] + " | " + src +
-                       " | Gain " + gain + " | Tab settings  H help  Q quit";
+                       " | Gain " + gain + " | Space play/pause  N next  P prev | Tab settings  H help";
             if (s.Length < scr.W) s = s.PadRight(scr.W);
             scr.Text(0, y, s, 0xB4B4BE, 0x1E1E28);
         }
@@ -1633,8 +1820,10 @@ namespace TermVis
             {
                 "DMZ TermVis controls",
                 "",
-                "M / 1-8      mode: bars, mirror, wave, waterfall,",
-                "             rain, code, radial, scope (XY)",
+                "M / Shift+M  next / previous visualization",
+                "1-8 classic; 9 kaleido; 0 tendrils; - cells; = terrain",
+                "Space        play / pause music",
+                "N / P        next / previous track",
                 "C / Shift+C  next / previous color theme",
                 "K            glyph style: blocks, ascii, code, dots",
                 "V            color by: height, frequency, loudness",
@@ -1643,7 +1832,7 @@ namespace TermVis
                 "A            auto-gain on/off",
                 "Left / Right bar width",
                 "G            gaps between bars",
-                "P            peak markers",
+                "Shift+P      peak markers",
                 "[ / ]        less / more smoothing",
                 "Tab or E     settings panel (all parameters)",
                 "B            status bar on/off",
@@ -1723,7 +1912,7 @@ namespace TermVis
                     Console.WriteLine("  --mic                 Windows: visualize the microphone instead of system audio");
                     Console.WriteLine("  --system              Windows: visualize system audio (default)");
                     Console.WriteLine("                        (macOS always uses the default input device)");
-                    Console.WriteLine("  --mode <name|1-8>     bars, mirror, wave, waterfall, rain, code, radial, scope");
+                    Console.WriteLine("  --mode <name|1-12>    bars, mirror, wave, waterfall, rain, code, radial, scope, kaleido, tendrils, cells, terrain");
                     Console.WriteLine("  --theme <name>        fire, ocean, neon, matrix, rainbow, mono, synthwave,");
                     Console.WriteLine("                        cyberpunk, sunset, amber, ice, toxic, blood, vapor, phosphor");
                     Console.WriteLine("  --glyphs <name>       blocks, ascii, code, dots");
