@@ -1,4 +1,4 @@
-// DMZ TermVis - a terminal audio visualizer for Windows and macOS.
+﻿// DMZ TermVis - a terminal audio visualizer for Windows and macOS.
 // Windows: captures system audio (WASAPI loopback) or the microphone.
 // macOS:   captures the default input device (microphone, or BlackHole for system audio).
 // Run:     run.bat    (Windows: compiles in memory and runs, no exe produced)
@@ -560,18 +560,25 @@ namespace TermVis
         public readonly string Name;
         public readonly Func<string> Get;
         public readonly Action<int> Adjust;
-        public Param(string name, Func<string> get, Action<int> adjust) { Name = name; Get = get; Adjust = adjust; }
+        public readonly Func<bool> Visible;
+        public Param(string name, Func<string> get, Action<int> adjust, Func<bool> visible = null)
+        { Name = name; Get = get; Adjust = adjust; Visible = visible; }
     }
 
     // ---------------------------------------------------------------- Visualizer
 
     sealed class Viz
     {
-        static readonly string[] ModeNames = { "Bars", "Mirror", "Wave", "Waterfall", "Rain", "Code", "Radial", "Scope" };
+        static readonly string[] ModeNames = { "Bars", "Mirror", "Wave", "Waterfall", "Rain", "Code", "Radial", "Scope",
+            "Retro", "Warp", "Tunnel", "Nebula", "Radar", "Reactor", "Ocean", "Reef", "Jellyfish", "Aurora" };
+        // T applies a suggested palette; changing modes keeps the user's chosen colors.
+        static readonly string[] ModeThemes = { "Fire", "Ocean", "Phosphor", "Ice", "Matrix", "Cyberpunk", "Neon", "Phosphor",
+            "Arcade", "Starlight", "Laser", "Cosmic", "Sonar", "Plasma", "Lagoon", "Coral", "Abyss", "Borealis" };
         static readonly string[] ThemeNames =
         {
             "Fire", "Ocean", "Neon", "Matrix", "Rainbow", "Mono",
             "Synthwave", "Cyberpunk", "Sunset", "Amber", "Ice", "Toxic", "Blood", "Vapor", "Phosphor",
+            "Arcade", "Starlight", "Laser", "Cosmic", "Sonar", "Plasma", "Lagoon", "Coral", "Abyss", "Borealis",
         };
         static readonly int[][] ThemeStops =
         {
@@ -590,6 +597,16 @@ namespace TermVis
             new[] { 0x280000, 0x800010, 0xFF2040, 0xFFB0B0 },
             new[] { 0x01CDFE, 0xB967FF, 0xFF71CE, 0xFFFB96 },
             new[] { 0x002A10, 0x00A040, 0x40FF80, 0xE0FFEA }, // P31 green CRT phosphor
+            new[] { 0x190B46, 0x7336D9, 0xFF387C, 0xFFB94A, 0xFFF1A8 },
+            new[] { 0x100C38, 0x4841AB, 0x609EFF, 0xB8E7FF, 0xFFFFFF },
+            new[] { 0x071B42, 0x006E95, 0x00E5FF, 0xA84DFF, 0xFFE8FF },
+            new[] { 0x160A35, 0x542A98, 0xB345C8, 0xF27CA8, 0xFFE3C8 },
+            new[] { 0x021C16, 0x087650, 0x20D890, 0xACFFAF, 0xEDFFE1 },
+            new[] { 0x200B46, 0x6414D9, 0xD52EFF, 0xFF8B37, 0xFFF6AE },
+            new[] { 0x021C38, 0x006B87, 0x00BFA6, 0x76EDCE, 0xE0FFF6 },
+            new[] { 0x071C47, 0x216A98, 0xEF638A, 0xFFAB80, 0xFFF0BC },
+            new[] { 0x020C26, 0x173975, 0x4A65DB, 0x5BE5DF, 0xD0FFF9 },
+            new[] { 0x101636, 0x205B72, 0x28D79C, 0xA0F4BA, 0xDB9FFF },
         };
         static readonly string[] GlyphNames = { "Blocks", "ASCII", "Code", "Dots" };
         static readonly string[] ColorByNames = { "Height", "Frequency", "Loudness" };
@@ -598,6 +615,8 @@ namespace TermVis
         const string EIGHTHS = " ▁▂▃▄▅▆▇█";
         const string ASCII9 = " .:-=+*%#";
         const string PEAKCHARS = "▔-=⠉";
+        // The classic Windows console (conhost) has no glyph for ▔, so use ▀ there; Windows Terminal sets WT_SESSION.
+        static readonly char BlockPeak = Platform.IsWindows && Environment.GetEnvironmentVariable("WT_SESSION") == null ? '▀' : '▔';
         const string CODECHARS = "0123456789ABCDEFabcdef{}[]()<>;:=+-*/&|!?#$%@_~^";
         static readonly int[] DotFill = { 0, 0xC0, 0xC0, 0xE4, 0xE4, 0xF6, 0xF6, 0xFF, 0xFF };
         const int N = 4096; // FFT size
@@ -607,6 +626,29 @@ namespace TermVis
         public double GainDb, RangeDb, MinHz, MaxHz, Tilt;
         public float Smooth, PeakGravity, RainSpeed, CodeSpeed, SpinSpeed;
         public float ScopeDecay, BeamIntensity, ScopeZoom;
+        sealed class EffectOption
+        {
+            public int Mode;
+            public string Key, Name;
+            public float Value, Default, Min, Max, Step;
+            public bool Density;
+            public void Set(float value) { Value = Math.Max(Min, Math.Min(Max, Step >= 1 ? (float)Math.Round(value) : value)); }
+            public string Display() { return Step >= 1 ? Value.ToString("0") : "x" + Value.ToString("0.00"); }
+        }
+        readonly List<EffectOption> effectOptions = new List<EffectOption>();
+        readonly Dictionary<string, EffectOption> optionKeys = new Dictionary<string, EffectOption>();
+        readonly Dictionary<string, EffectOption>[] modeOptions = new Dictionary<string, EffectOption>[18];
+        public float EffectSpeed
+        {
+            get { return modeOptions[Math.Max(8, Mode)]["speed"].Value; }
+            set { modeOptions[Math.Max(8, Mode)]["speed"].Set(value); }
+        }
+        // Compatibility with the first scene release's detail multiplier.
+        public float EffectDetail
+        {
+            get { foreach (EffectOption o in effectOptions) if (o.Mode == Math.Max(8, Mode) && o.Density) return o.Value / o.Default; return 1; }
+            set { foreach (EffectOption o in effectOptions) if (o.Mode == Math.Max(8, Mode) && o.Density) o.Set(o.Default * value); }
+        }
         public bool AutoGain, Gap, Peaks, UseMic, ShowStatus, ScopeGrid, ScopeSmooth;
 
         // ---- runtime state
@@ -652,6 +694,10 @@ namespace TermVis
 
         // radial state
         float spin;
+        readonly double[] effectTimes = new double[18];
+        double effectTime { get { return effectTimes[Mode]; } set { effectTimes[Mode] = value; } }
+        float waterfallClock;
+        readonly Smoother effectSmooth = new Smoother();
 
         // scope state: beam energy per braille dot, decaying like phosphor
         float[] glow = new float[0];
@@ -661,38 +707,125 @@ namespace TermVis
 
         public Viz()
         {
+            CreateEffectOptions();
             Defaults();
             for (int i = 0; i < N; i++) hann[i] = 0.5 - 0.5 * Math.Cos(2 * Math.PI * i / (N - 1));
             pars = new List<Param>
             {
                 new Param("Mode", () => ModeNames[Mode], d => Mode = Wrap(Mode + d, ModeNames.Length)),
                 new Param("Color theme", () => ThemeNames[Theme], d => { Theme = Wrap(Theme + d, ThemeNames.Length); BuildPalette(); }),
-                new Param("Glyphs (bars)", () => GlyphNames[Glyphs], d => Glyphs = Wrap(Glyphs + d, GlyphNames.Length)),
-                new Param("Color by", () => ColorByNames[ColorBy], d => ColorBy = Wrap(ColorBy + d, ColorByNames.Length)),
+                new Param("Suggested colors", () => ModeThemes[Mode] + " (T)", d => SuggestedTheme()),
+                new Param("Glyphs (bars)", () => GlyphNames[Glyphs], d => Glyphs = Wrap(Glyphs + d, GlyphNames.Length), () => Mode <= 1),
+                new Param("Color by", () => ColorByNames[ColorBy], d => ColorBy = Wrap(ColorBy + d, ColorByNames.Length), () => Mode <= 1 || Mode == 5),
                 new Param("Source", () => SourceName, d => ToggleSource()),
                 new Param("Gain", () => GainDb.ToString("+0;-0;0") + " dB", d => GainDb = ClampD(GainDb + 2 * d, -30, 30)),
-                new Param("Auto-gain", () => OnOff(AutoGain), d => AutoGain = !AutoGain),
-                new Param("Dynamic range", () => RangeDb.ToString("0") + " dB", d => RangeDb = ClampD(RangeDb + 5 * d, 20, 90)),
-                new Param("Low cut", () => MinHz.ToString("0") + " Hz", d => MinHz = ClampD(Math.Round(MinHz * Math.Pow(1.25, d)), 20, 500)),
-                new Param("High cut", () => (MaxHz / 1000).ToString("0.0") + " kHz", d => MaxHz = ClampD(MaxHz * Math.Pow(1.15, d), 2000, 22000)),
-                new Param("Treble boost", () => Tilt.ToString("0.0") + " dB/oct", d => Tilt = ClampD(Tilt + 0.5 * d, 0, 6)),
-                new Param("Smoothing", () => Smooth.ToString("0.00") + " s", d => Smooth = (float)ClampD(Smooth * Math.Pow(1.25, d), 0.02, 1)),
-                new Param("Bar width", () => BarWidth.ToString(), d => BarWidth = Clamp(BarWidth + d, 1, 8)),
-                new Param("Bar gaps", () => OnOff(Gap), d => Gap = !Gap),
-                new Param("Peak markers", () => OnOff(Peaks), d => Peaks = !Peaks),
-                new Param("Peak gravity", () => PeakGravity.ToString("0.00"), d => PeakGravity = (float)ClampD(PeakGravity + 0.25 * d, 0.25, 6)),
-                new Param("Rain speed", () => "x" + RainSpeed.ToString("0.00"), d => RainSpeed = (float)ClampD(RainSpeed * Math.Pow(1.25, d), 0.25, 4)),
-                new Param("Code scroll speed", () => "x" + CodeSpeed.ToString("0.00"), d => CodeSpeed = (float)ClampD(CodeSpeed * Math.Pow(1.25, d), 0.25, 4)),
-                new Param("Radial spin", () => SpinSpeed.ToString("+0.0;-0.0;0.0"), d => SpinSpeed = (float)ClampD(Math.Round(SpinSpeed + 0.1 * d, 1), -3, 3)),
-                new Param("Scope zoom", () => "x" + ScopeZoom.ToString("0.00"), d => ScopeZoom = (float)ClampD(ScopeZoom * Math.Pow(1.25, d), 0.25, 8)),
-                new Param("Scope persistence", () => (ScopeDecay * 1000).ToString("0") + " ms", d => ScopeDecay = (float)ClampD(ScopeDecay * Math.Pow(1.4, d), 0.005, 2)),
-                new Param("Beam intensity", () => "x" + BeamIntensity.ToString("0.00"), d => BeamIntensity = (float)ClampD(BeamIntensity * Math.Pow(1.4, d), 0.05, 20)),
-                new Param("Scope smooth beam", () => OnOff(ScopeSmooth), d => ScopeSmooth = !ScopeSmooth),
-                new Param("Scope graticule", () => OnOff(ScopeGrid), d => ScopeGrid = !ScopeGrid),
+                new Param("Auto-gain", () => OnOff(AutoGain), d => AutoGain = !AutoGain, () => Mode != 7),
+                new Param("Dynamic range", () => RangeDb.ToString("0") + " dB", d => RangeDb = ClampD(RangeDb + 5 * d, 20, 90), () => Mode != 2 && Mode != 7),
+                new Param("Low cut", () => MinHz.ToString("0") + " Hz", d => MinHz = ClampD(Math.Round(MinHz * Math.Pow(1.25, d)), 20, 500), () => Mode != 2 && Mode != 7),
+                new Param("High cut", () => (MaxHz / 1000).ToString("0.0") + " kHz", d => MaxHz = ClampD(MaxHz * Math.Pow(1.15, d), 2000, 22000), () => Mode != 2 && Mode != 7),
+                new Param("Treble boost", () => Tilt.ToString("0.0") + " dB/oct", d => Tilt = ClampD(Tilt + 0.5 * d, 0, 6), () => Mode != 2 && Mode != 7),
+                new Param("Smoothing", () => Smooth.ToString("0.00") + " s", d => Smooth = (float)ClampD(Smooth * Math.Pow(1.25, d), 0.02, 1), () => Mode != 2 && Mode != 3 && Mode != 4 && Mode != 7),
+                new Param("Bar width", () => BarWidth.ToString(), d => BarWidth = Clamp(BarWidth + d, 1, 8), () => Mode <= 1 || Mode == 5),
+                new Param("Bar gaps", () => OnOff(Gap), d => Gap = !Gap, () => Mode <= 1 || Mode == 5),
+                new Param("Peak markers", () => OnOff(Peaks), d => Peaks = !Peaks, () => Mode <= 1),
+                new Param("Peak gravity", () => PeakGravity.ToString("0.00"), d => PeakGravity = (float)ClampD(PeakGravity + 0.25 * d, 0.25, 6), () => Mode <= 1 && Peaks),
+                new Param("Rain speed", () => "x" + RainSpeed.ToString("0.00"), d => RainSpeed = (float)ClampD(RainSpeed * Math.Pow(1.25, d), 0.25, 4), () => Mode == 4),
+                new Param("Code scroll speed", () => "x" + CodeSpeed.ToString("0.00"), d => CodeSpeed = (float)ClampD(CodeSpeed * Math.Pow(1.25, d), 0.25, 4), () => Mode == 5),
+                new Param("Radial spin", () => SpinSpeed.ToString("+0.0;-0.0;0.0"), d => SpinSpeed = (float)ClampD(Math.Round(SpinSpeed + 0.1 * d, 1), -3, 3), () => Mode == 6),
+                new Param("Scope zoom", () => "x" + ScopeZoom.ToString("0.00"), d => ScopeZoom = (float)ClampD(ScopeZoom * Math.Pow(1.25, d), 0.25, 8), () => Mode == 7),
+                new Param("Scope persistence", () => (ScopeDecay * 1000).ToString("0") + " ms", d => ScopeDecay = (float)ClampD(ScopeDecay * Math.Pow(1.4, d), 0.005, 2), () => Mode == 7),
+                new Param("Beam intensity", () => "x" + BeamIntensity.ToString("0.00"), d => BeamIntensity = (float)ClampD(BeamIntensity * Math.Pow(1.4, d), 0.05, 20), () => Mode == 7),
+                new Param("Scope smooth beam", () => OnOff(ScopeSmooth), d => ScopeSmooth = !ScopeSmooth, () => Mode == 7),
+                new Param("Scope graticule", () => OnOff(ScopeGrid), d => ScopeGrid = !ScopeGrid, () => Mode == 7),
                 new Param("Frame rate", () => Fps + " fps", d => Fps = FpsSteps[Clamp(Array.IndexOf(FpsSteps, Fps) + d, 0, FpsSteps.Length - 1)]),
                 new Param("Terminal colors", () => ColorModeNames[ColorMode], d => ColorMode = Wrap(ColorMode + d, ColorModeNames.Length)),
                 new Param("Status bar", () => OnOff(ShowStatus), d => ShowStatus = !ShowStatus),
             };
+            var scenePars = new List<Param>();
+            foreach (EffectOption option in effectOptions)
+            {
+                EffectOption o = option;
+                scenePars.Add(new Param(o.Name, () => o.Display(), d => o.Set(o.Value + o.Step * d), () => Mode == o.Mode));
+            }
+            scenePars.Add(new Param("Reset this effect", () => "< apply >", d => ResetEffect()));
+            pars.InsertRange(3, scenePars);
+        }
+
+        List<Param> ActiveParams()
+        {
+            var active = new List<Param>();
+            foreach (Param p in pars) if (p.Visible == null || p.Visible()) active.Add(p);
+            selected = Clamp(selected, 0, active.Count - 1);
+            return active;
+        }
+
+        void AddOption(int mode, string key, string name, float value, float min, float max, float step, bool density = false)
+        {
+            var option = new EffectOption { Mode = mode, Key = ModeNames[mode].ToLowerInvariant() + "." + key,
+                Name = name, Value = value, Default = value, Min = min, Max = max, Step = step, Density = density };
+            effectOptions.Add(option); optionKeys.Add(option.Key, option); modeOptions[mode].Add(key, option);
+        }
+
+        float SceneValue(string key) { return modeOptions[Mode][key].Value; }
+
+        void CreateEffectOptions()
+        {
+            for (int i = 0; i < modeOptions.Length; i++) modeOptions[i] = new Dictionary<string, EffectOption>();
+            AddOption(2, "zoom", "Wave zoom", 1, 0.25f, 4, 0.25f);
+            AddOption(3, "speed", "Scroll speed", 1, 0.25f, 4, 0.25f);
+            AddOption(4, "density", "Rain density", 1, 0.25f, 4, 0.25f);
+            AddOption(4, "trails", "Trail length", 1, 0.25f, 4, 0.25f);
+            AddOption(5, "glitch", "Glitch amount", 1, 0, 3, 0.25f);
+            AddOption(6, "bands", "Spectrum bands", 48, 12, 96, 4);
+            AddOption(6, "radius", "Ring size", 1, 0.5f, 2, 0.1f);
+            for (int i = 8; i < 18; i++)
+            {
+                AddOption(i, "speed", "Motion speed", 1, 0.25f, 4, 0.25f);
+                AddOption(i, "response", "Audio response", 1, 0, 2, 0.1f);
+            }
+            AddOption(8, "grid", "Grid lines", 14, 4, 24, 1);
+            AddOption(8, "sun", "Sun size", 1, 0.5f, 1.8f, 0.1f);
+            AddOption(9, "stars", "Star count", 170, 20, 1000, 10, true);
+            AddOption(9, "streak", "Streak length", 1, 0.1f, 3, 0.1f);
+            AddOption(9, "spread", "Star spread", 1, 0.5f, 2, 0.1f);
+            AddOption(10, "rings", "Tunnel rings", 15, 3, 40, 1, true);
+            AddOption(10, "sides", "Polygon sides", 12, 3, 24, 1);
+            AddOption(10, "twist", "Tunnel twist", 1, -2, 2, 0.1f);
+            AddOption(11, "particles", "Particle count", 650, 100, 2000, 50, true);
+            AddOption(11, "arms", "Galaxy arms", 4, 1, 8, 1);
+            AddOption(11, "spread", "Arm spread", 1, 0.25f, 2, 0.25f);
+            AddOption(12, "contacts", "Contact count", 40, 5, 150, 5, true);
+            AddOption(12, "rings", "Range rings", 4, 1, 8, 1);
+            AddOption(12, "trail", "Sweep trail", 1, 0.25f, 2, 0.25f);
+            AddOption(13, "rings", "Reactor rings", 5, 1, 8, 1);
+            AddOption(13, "rotation", "Ring rotation", 1, 0.25f, 3, 0.25f);
+            AddOption(13, "core", "Core size", 1, 0.5f, 2, 0.1f);
+            AddOption(14, "layers", "Wave layers", 14, 3, 40, 1, true);
+            AddOption(14, "height", "Wave height", 1, 0.25f, 3, 0.25f);
+            AddOption(14, "wavelength", "Wavelength", 1, 0.5f, 2, 0.1f);
+            AddOption(15, "plants", "Plant count", 32, 4, 80, 2, true);
+            AddOption(15, "bubbles", "Bubble count", 36, 0, 150, 5, true);
+            AddOption(15, "sway", "Plant sway", 1, 0, 3, 0.25f);
+            AddOption(16, "count", "Jellyfish count", 5, 1, 20, 1, true);
+            AddOption(16, "size", "Jellyfish size", 1, 0.5f, 2, 0.1f);
+            AddOption(16, "tentacles", "Tentacle count", 7, 2, 16, 1);
+            AddOption(16, "length", "Tentacle length", 1, 0.25f, 2, 0.25f);
+            AddOption(17, "curtains", "Light curtains", 4, 1, 10, 1, true);
+            AddOption(17, "height", "Curtain height", 1, 0.25f, 3, 0.25f);
+            AddOption(17, "stars", "Star count", 65, 0, 300, 10);
+        }
+
+        void ResetEffect()
+        {
+            foreach (EffectOption o in effectOptions) if (o.Mode == Mode) o.Value = o.Default;
+            switch (Mode)
+            {
+                case 0: case 1: BarWidth = 2; Glyphs = 0; ColorBy = 0; Gap = Peaks = true; PeakGravity = 1.5f; break;
+                case 4: RainSpeed = 1; break;
+                case 5: CodeSpeed = 1; BarWidth = 2; Gap = true; ColorBy = 0; break;
+                case 6: SpinSpeed = 0.3f; break;
+                case 7: ScopeZoom = 1; ScopeDecay = 0.06f; BeamIntensity = 1; ScopeSmooth = ScopeGrid = true; break;
+            }
         }
 
         public void Defaults()
@@ -701,6 +834,7 @@ namespace TermVis
             GainDb = 0; RangeDb = 50; MinHz = 30; MaxHz = 16000; Tilt = 3;
             Smooth = 0.12f; PeakGravity = 1.5f; RainSpeed = 1; CodeSpeed = 1; SpinSpeed = 0.3f;
             ScopeDecay = 0.06f; BeamIntensity = 1; ScopeZoom = 1; ScopeGrid = true; ScopeSmooth = true;
+            foreach (EffectOption o in effectOptions) o.Value = o.Default;
             AutoGain = true; Gap = true; Peaks = true; UseMic = false; ShowStatus = true;
         }
 
@@ -748,7 +882,7 @@ namespace TermVis
         string SettingsText()
         {
             var inv = System.Globalization.CultureInfo.InvariantCulture;
-            return string.Join(Environment.NewLine, new[]
+            string text = string.Join(Environment.NewLine, new[]
                 {
                     "mode=" + ModeNames[Mode].ToLowerInvariant(),
                     "theme=" + ThemeNames[Theme].ToLowerInvariant(),
@@ -778,6 +912,8 @@ namespace TermVis
                     "status=" + ShowStatus,
                     "fps=" + Fps,
                 }) + Environment.NewLine;
+            foreach (EffectOption o in effectOptions) text += o.Key + "=" + o.Value.ToString(inv) + Environment.NewLine;
+            return text;
         }
 
         public bool Apply(string key, string val)
@@ -785,8 +921,10 @@ namespace TermVis
             var inv = System.Globalization.CultureInfo.InvariantCulture;
             string v = val.ToLowerInvariant();
             double d;
-            bool ok = double.TryParse(val, System.Globalization.NumberStyles.Float, inv, out d);
+            bool ok = double.TryParse(val, System.Globalization.NumberStyles.Float, inv, out d) && !double.IsNaN(d) && !double.IsInfinity(d);
             bool b = v == "true" || v == "1" || v == "yes" || v == "on";
+            EffectOption option;
+            if (optionKeys.TryGetValue(key, out option)) { if (ok) option.Set((float)d); return ok; }
             switch (key)
             {
                 case "mode": { int i = IndexOf(ModeNames, v); if (i >= 0) Mode = i; else if (ok) Mode = Clamp((int)d - 1, 0, ModeNames.Length - 1); return i >= 0 || ok; }
@@ -809,6 +947,8 @@ namespace TermVis
                 case "rainspeed": if (ok) RainSpeed = (float)ClampD(d, 0.25, 4); return ok;
                 case "codespeed": if (ok) CodeSpeed = (float)ClampD(d, 0.25, 4); return ok;
                 case "spin": if (ok) SpinSpeed = (float)ClampD(d, -3, 3); return ok;
+                case "effectspeed": if (ok) foreach (EffectOption o in effectOptions) if (o.Mode >= 8 && o.Key.EndsWith(".speed")) o.Set((float)d); return ok;
+                case "effectdetail": if (ok) foreach (EffectOption o in effectOptions) if (o.Density) o.Set(o.Default * (float)ClampD(d, 0.5, 2)); return ok;
                 case "scopezoom": if (ok) ScopeZoom = (float)ClampD(d, 0.25, 8); return ok;
                 case "scopedecay": if (ok) ScopeDecay = (float)ClampD(d, 0.005, 2); return ok;
                 case "beam": if (ok) BeamIntensity = (float)ClampD(d, 0.05, 20); return ok;
@@ -888,12 +1028,13 @@ namespace TermVis
                 var k = Console.ReadKey(true);
                 if (showSettings)
                 {
+                    List<Param> active = ActiveParams();
                     switch (k.Key)
                     {
-                        case ConsoleKey.UpArrow: selected = Wrap(selected - 1, pars.Count); continue;
-                        case ConsoleKey.DownArrow: selected = Wrap(selected + 1, pars.Count); continue;
-                        case ConsoleKey.LeftArrow: pars[selected].Adjust(-1); continue;
-                        case ConsoleKey.RightArrow: pars[selected].Adjust(1); continue;
+                        case ConsoleKey.UpArrow: selected = Wrap(selected - 1, active.Count); continue;
+                        case ConsoleKey.DownArrow: selected = Wrap(selected + 1, active.Count); continue;
+                        case ConsoleKey.LeftArrow: active[selected].Adjust(-1); continue;
+                        case ConsoleKey.RightArrow: active[selected].Adjust(1); continue;
                         case ConsoleKey.Tab: case ConsoleKey.Escape: case ConsoleKey.Enter: showSettings = false; continue;
                     }
                 }
@@ -901,7 +1042,8 @@ namespace TermVis
                 {
                     case ConsoleKey.Q: case ConsoleKey.Escape: quit = true; break;
                     case ConsoleKey.Tab: case ConsoleKey.E: showSettings = !showSettings; showHelp = false; break;
-                    case ConsoleKey.M: Mode = Wrap(Mode + 1, ModeNames.Length); break;
+                    case ConsoleKey.M: Mode = Wrap(Mode + ((k.Modifiers & ConsoleModifiers.Shift) != 0 || k.KeyChar == 'M' ? -1 : 1), ModeNames.Length); break;
+                    case ConsoleKey.T: SuggestedTheme(); break;
                     case ConsoleKey.C:
                         bool back = (k.Modifiers & ConsoleModifiers.Shift) != 0 || k.KeyChar == 'C';
                         Theme = Wrap(Theme + (back ? -1 : 1), ThemeNames.Length); BuildPalette();
@@ -925,7 +1067,7 @@ namespace TermVis
                         break;
                     default:
                         // matched by character since [ and ] map to different ConsoleKeys across platforms
-                        if (k.KeyChar >= '1' && k.KeyChar <= '0' + ModeNames.Length) Mode = k.KeyChar - '1';
+                        if (k.KeyChar >= '1' && k.KeyChar <= '8') Mode = k.KeyChar - '1';
                         else if (k.KeyChar == '[') Smooth = Math.Max(0.02f, Smooth / 1.25f);
                         else if (k.KeyChar == ']') Smooth = Math.Min(1.0f, Smooth * 1.25f);
                         break;
@@ -1082,6 +1224,12 @@ namespace TermVis
             }
         }
 
+        void SuggestedTheme()
+        {
+            Theme = IndexOf(ThemeNames, ModeThemes[Mode].ToLowerInvariant());
+            BuildPalette();
+        }
+
         int Pal(float t) { return pal[Clamp((int)(t * 63 + 0.5f), 0, 63)]; }
         int Heat(float t) { return heat[Clamp((int)(t * 63 + 0.5f), 0, 63)]; }
 
@@ -1161,6 +1309,7 @@ namespace TermVis
                     case 5: DrawCode(vh, dt); break;
                     case 6: DrawRadial(vh, dt); break;
                     case 7: DrawScope(vh, dt); break;
+                    default: DrawEffect(vh, dt); break;
                 }
             }
             if (ShowStatus) DrawStatus(h - 1);
@@ -1207,7 +1356,7 @@ namespace TermVis
                 {
                     int pb = Math.Min(up - 1, (int)(peak[i] * up));
                     if (Clamp((int)(h8 - pb * 8), 0, 8) == 0)
-                        for (int dx = 0; dx < bw; dx++) scr.Set(xs + dx, up - 1 - pb, PEAKCHARS[Glyphs], peakCol, -1);
+                        for (int dx = 0; dx < bw; dx++) scr.Set(xs + dx, up - 1 - pb, Glyphs == 0 ? BlockPeak : PEAKCHARS[Glyphs], peakCol, -1);
                 }
                 if (mirror)
                 {
@@ -1268,6 +1417,7 @@ namespace TermVis
             wavePeak = Math.Max(wavePeak, 0.02f);
             float scale = (AutoGain ? 0.9f / wavePeak : 1f) * (float)Math.Pow(10, GainDb / 20.0);
 
+            scale *= SceneValue("zoom");
             braille.Begin(scr.W, vh);
             float mid = (ph - 1) / 2f, py = -1;
             for (int x = 0; x < pw; x++)
@@ -1291,11 +1441,17 @@ namespace TermVis
             int capRows = vh * 2;
             if (wfWidth != n) { history.Clear(); wfWidth = n; }
 
-            float[] row;
-            if (history.Count >= capRows) { row = history[history.Count - 1]; history.RemoveAt(history.Count - 1); }
-            else row = new float[n];
-            Array.Copy(wfSmooth.V, row, n);
-            history.Insert(0, row);
+            waterfallClock += dt * 60 * SceneValue("speed");
+            int rows = (int)waterfallClock;
+            waterfallClock -= rows;
+            for (int slice = 0; slice < rows; slice++)
+            {
+                float[] row;
+                if (history.Count >= capRows) { row = history[history.Count - 1]; history.RemoveAt(history.Count - 1); }
+                else row = new float[n];
+                Array.Copy(wfSmooth.V, row, n);
+                history.Insert(0, row);
+            }
             while (history.Count > capRows) history.RemoveAt(history.Count - 1);
 
             for (int r = 0; r < vh; r++)
@@ -1319,7 +1475,7 @@ namespace TermVis
             Bands(n);
             rainSmooth.Apply(raw, n, dt, 0.02f, 0.15f);
 
-            float decay = dt * 1.4f * (float)Math.Sqrt(RainSpeed);
+            float decay = dt * 1.4f * (float)Math.Sqrt(RainSpeed) / SceneValue("trails");
             for (int i = 0; i < rainB.Length; i++) if (rainB[i] > 0) rainB[i] = Math.Max(0, rainB[i] - decay);
             int mutations = (int)(n * vh * dt * 0.6f) + 1;
             for (int m = 0; m < mutations; m++)
@@ -1333,8 +1489,8 @@ namespace TermVis
             for (int x = 0; x < n; x++)
             {
                 float v = rainSmooth.V[x];
-                float rate = v * v * v * 10f * RainSpeed;
-                if (colDrops[x] < 3 && rng.NextDouble() < rate * dt)
+                float rate = v * v * v * 10f * RainSpeed * SceneValue("density");
+                if (colDrops[x] < Math.Max(1, (int)(3 * SceneValue("density"))) && rng.NextDouble() < rate * dt)
                     drops.Add(new Drop { X = x, Y = 0, LastRow = -1, Speed = (12 + 45 * v) * RainSpeed });
             }
 
@@ -1377,7 +1533,7 @@ namespace TermVis
             float bass = Average(barSmooth.V, 0, Math.Max(1, n / 8));
             beatCooldown -= dt;
             glitch -= dt;
-            if (bass - bassAvg > 0.12f && beatCooldown <= 0) { glitch = 0.12f; beatCooldown = 0.2f; }
+            if (bass - bassAvg > 0.12f && beatCooldown <= 0) { glitch = 0.12f * SceneValue("glitch"); beatCooldown = 0.2f; }
             bassAvg += (bass - bassAvg) * (1f - (float)Math.Exp(-dt / 0.5f));
 
             codeScroll += dt * CodeSpeed * (1.5f + 30f * bass * bass);
@@ -1461,14 +1617,14 @@ namespace TermVis
         void DrawRadial(int vh, float dt)
         {
             int pw = scr.W * 2, ph = vh * 4;
-            int n = 48;
+            int n = (int)SceneValue("bands");
             Bands(n);
             radSmooth.Apply(raw, n, dt, 0.015f, Smooth);
             float bass = Average(radSmooth.V, 0, n / 8);
             spin += SpinSpeed * dt * (1 + bass * 2);
 
             float cx = pw / 2f, cy = ph / 2f, size = Math.Min(pw, ph) / 2f;
-            float r0 = size * 0.28f * (1 + 0.25f * bass), extra = size * 0.68f;
+            float r0 = size * 0.28f * SceneValue("radius") * (1 + 0.25f * bass), extra = size * 0.68f;
             braille.Begin(scr.W, vh);
 
             int ringSteps = (int)(r0 * 7) + 8;
@@ -1487,6 +1643,289 @@ namespace TermVis
                 braille.Line(cx + c * r0, cy + s * r0, cx + c * len, cy + s * len, 0.2f, 0.2f + 0.8f * v);
             }
             braille.Draw(scr, t => Pal(t));
+        }
+
+        // Scene effects share a smoothed spectrum, but use independent geometry and motion.
+        // Time is measured in seconds so speed stays consistent at every frame rate.
+        void DrawEffect(int vh, float dt)
+        {
+            Bands(64);
+            effectSmooth.Apply(raw, 64, dt, 0.025f, Smooth);
+            float response = SceneValue("response");
+            float bass = Clamp01(Average(effectSmooth.V, 0, 10) * response), energy = Clamp01(Average(effectSmooth.V, 0, 64) * response);
+            effectTime += dt * EffectSpeed * (0.35 + bass * 1.3);
+            braille.Begin(scr.W, vh);
+            switch (Mode)
+            {
+                case 8: DrawRetro(vh, bass); break;
+                case 9: DrawWarp(vh, bass); break;
+                case 10: DrawTunnel(vh, bass); break;
+                case 11: DrawNebula(vh, energy); break;
+                case 12: DrawRadar(vh, energy); break;
+                case 13: DrawReactor(vh, bass); break;
+                case 14: DrawOcean(vh, bass); break;
+                case 15: DrawReef(vh, energy); break;
+                case 16: DrawJellyfish(vh, bass); break;
+                case 17: DrawAurora(vh, energy); break;
+            }
+            braille.Draw(scr, v => Scale(Pal(v), 0.35 + 0.65 * v));
+        }
+
+        float Band(float position)
+        {
+            return Clamp01(effectSmooth.V[Clamp((int)(position * 63), 0, 63)] * SceneValue("response"));
+        }
+
+        static double Frac(double x) { return x - Math.Floor(x); }
+        static float Seed(int i) { return (Hash(i) % 100000) / 100000f; }
+
+        void Circle(float cx, float cy, float radius, float color, int sides)
+        {
+            for (int i = 0; i < sides; i++)
+            {
+                double a = i * Math.PI * 2 / sides, b = (i + 1) * Math.PI * 2 / sides;
+                braille.Line(cx + (float)Math.Cos(a) * radius, cy + (float)Math.Sin(a) * radius,
+                    cx + (float)Math.Cos(b) * radius, cy + (float)Math.Sin(b) * radius, color, color);
+            }
+        }
+
+        // An outrun horizon: striped sun, moving perspective grid and spectrum mountains.
+        void DrawRetro(int vh, float bass)
+        {
+            float w = scr.W * 2, h = vh * 4, horizon = h * 0.48f, cx = w / 2;
+            float r = Math.Min(w * 0.19f, h * 0.27f) * SceneValue("sun") * (1 + bass * 0.12f), cy = horizon - r * 0.65f;
+            for (int y = (int)(cy - r); y < cy + r; y++)
+            {
+                if (y > cy && y % 6 >= 3) continue;
+                float dy = y - cy, dx = (float)Math.Sqrt(Math.Max(0, r * r - dy * dy));
+                braille.Line(cx - dx, y, cx + dx, y, 0.65f + (cy - y) / r * 0.25f, 0.9f);
+            }
+            for (int i = -8; i <= 8; i++)
+                braille.Line(cx + i * w * 0.025f, horizon, cx + i * w * 0.22f, h - 1, 0.12f, 0.6f);
+            int grid = (int)SceneValue("grid");
+            for (int i = 0; i < grid; i++)
+            {
+                float z = (float)Frac(i / (double)grid + effectTime * 0.28);
+                float y = horizon + z * z * (h - horizon);
+                braille.Line(0, y, w - 1, y, 0.15f + z * 0.4f, 0.15f + z * 0.4f);
+            }
+            float px = 0, py = horizon;
+            for (int i = 0; i < 64; i++)
+            {
+                float x = i * (w - 1) / 63, y = horizon - Band(i / 63f) * h * 0.21f;
+                if (i > 0) braille.Line(px, py, x, y, 0.7f, 0.85f);
+                px = x; py = y;
+            }
+        }
+
+        // Deterministic 3D stars recycle in depth; nearer stars leave longer streaks.
+        void DrawWarp(int vh, float bass)
+        {
+            float w = scr.W * 2, h = vh * 4, cx = w / 2, cy = h / 2;
+            int count = (int)SceneValue("stars");
+            for (int i = 0; i < count; i++)
+            {
+                double a = Seed(i * 7 + 1) * Math.PI * 2;
+                float z = 0.12f + (float)Frac(Seed(i * 7 + 2) - effectTime * 0.38) * 3.8f;
+                float spread = (0.08f + Seed(i * 7 + 3) * 0.9f) * SceneValue("spread");
+                float dx = (float)Math.Cos(a) * w * spread, dy = (float)Math.Sin(a) * h * spread;
+                float tail = z + (0.025f + bass * 0.2f + Band(Seed(i + 9)) * 0.12f) * SceneValue("streak");
+                float x = cx + dx / z, y = cy + dy / z;
+                // Offscreen stars do not need expensive clipped line traversal.
+                if (x < 0 || x >= w || y < 0 || y >= h) continue;
+                braille.Line(cx + dx / tail, cy + dy / tail, x, y, 0.25f, 0.55f + 0.45f / (1 + z));
+            }
+        }
+
+        void DrawTunnel(int vh, float bass)
+        {
+            float w = scr.W * 2, h = vh * 4, size = Math.Min(w, h) * 0.9f;
+            int rings = (int)SceneValue("rings");
+            for (int j = rings; j >= 0; j--)
+            {
+                float z = (float)Frac(j / (double)(rings + 1) + effectTime * 0.22);
+                float radius = 3 + z * z * size;
+                float cx = w / 2 + (float)Math.Sin(effectTime * 0.7 + z * 2) * w * 0.08f * z;
+                float cy = h / 2 + (float)Math.Cos(effectTime * 0.6 + z * 2) * h * 0.08f * z;
+                int sides = (int)SceneValue("sides");
+                for (int k = 0; k < sides; k++)
+                {
+                    double a = k * Math.PI * 2 / sides + (effectTime * 0.25 + z) * SceneValue("twist"), b = a + Math.PI * 2 / sides;
+                    float r0 = radius * (1 + bass * 0.08f + Band(k / (float)(sides - 1)) * 0.16f);
+                    float r1 = radius * (1 + bass * 0.08f + Band((k + 1) % sides / (float)(sides - 1)) * 0.16f);
+                    braille.Line(cx + (float)Math.Cos(a) * r0, cy + (float)Math.Sin(a) * r0,
+                        cx + (float)Math.Cos(b) * r1, cy + (float)Math.Sin(b) * r1, 0.15f + z * 0.8f, 0.15f + z * 0.8f);
+                }
+            }
+        }
+
+        // A rotating spiral galaxy: each arm ripples to a different part of the spectrum.
+        void DrawNebula(int vh, float energy)
+        {
+            float w = scr.W * 2, h = vh * 4, size = Math.Min(w, h) * 0.48f;
+            int count = (int)SceneValue("particles");
+            for (int i = 0; i < count; i++)
+            {
+                float r = (float)Math.Sqrt(Seed(i * 3 + 1));
+                int arms = (int)SceneValue("arms");
+                double a = i % arms * Math.PI * 2 / arms + r * 5 - effectTime * 0.35 + (Seed(i * 3 + 2) - 0.5) * 0.55 * SceneValue("spread");
+                float ripple = 1 + Band(r) * 0.22f;
+                float x = w / 2 + (float)Math.Cos(a) * r * size * ripple;
+                float y = h / 2 + (float)Math.Sin(a) * r * size * 0.65f * ripple;
+                braille.Plot((int)x, (int)y, 0.25f + (1 - r) * 0.55f + energy * 0.2f);
+            }
+            Circle(w / 2, h / 2, 2 + energy * 4, 1, 24);
+        }
+
+        void DrawRadar(int vh, float energy)
+        {
+            float cx = scr.W, cy = vh * 2, size = Math.Min(scr.W * 2, vh * 4) * 0.46f;
+            int rings = (int)SceneValue("rings");
+            for (int j = 1; j <= rings; j++) Circle(cx, cy, size * j / rings, 0.12f, 100);
+            braille.Line(cx - size, cy, cx + size, cy, 0.12f, 0.12f);
+            braille.Line(cx, cy - size, cx, cy + size, 0.12f, 0.12f);
+            double sweep = effectTime * 1.5;
+            for (int j = 0; j < 24; j++)
+            {
+                double a = sweep - j * 0.024 * SceneValue("trail");
+                float c = 0.15f + (1 - j / 24f) * 0.65f;
+                braille.Line(cx, cy, cx + (float)Math.Cos(a) * size, cy + (float)Math.Sin(a) * size, c, c);
+            }
+            for (int i = 0; i < (int)SceneValue("contacts"); i++)
+            {
+                double a = Seed(i * 5 + 1) * Math.PI * 2;
+                float r = size * (0.15f + Seed(i * 5 + 2) * 0.8f);
+                double age = Frac((sweep - a) / (Math.PI * 2));
+                float v = Band(Seed(i * 5 + 3));
+                float bright = (float)Math.Exp(-age * 5 / SceneValue("trail")) * (0.35f + v * 0.65f);
+                if (bright < 0.12f) continue;
+                Circle(cx + (float)Math.Cos(a) * r, cy + (float)Math.Sin(a) * r, 1 + v * 3, bright, 12);
+            }
+            Circle(cx, cy, 2 + energy * 3, 0.9f, 20);
+        }
+
+        void DrawReactor(int vh, float bass)
+        {
+            float cx = scr.W, cy = vh * 2, size = Math.Min(scr.W * 2, vh * 4) * 0.46f;
+            int ringCount = (int)SceneValue("rings");
+            for (int j = 0; j < ringCount; j++)
+            {
+                float radius = size * (0.22f + j * 0.68f / Math.Max(1, ringCount - 1)) * (1 + bass * 0.06f);
+                for (int k = 0; k < 120; k++)
+                {
+                    if ((k / 10 + j) % 3 == 0) continue;
+                    double a = k * Math.PI / 60 + effectTime * (j % 2 == 0 ? 0.6 : -0.4) * SceneValue("rotation");
+                    double b = a + Math.PI / 60;
+                    float v = Band(k / 119f), r = radius + v * size * 0.06f;
+                    braille.Line(cx + (float)Math.Cos(a) * r, cy + (float)Math.Sin(a) * r,
+                        cx + (float)Math.Cos(b) * r, cy + (float)Math.Sin(b) * r, 0.2f + v * 0.75f, 0.2f + v * 0.75f);
+                }
+            }
+            for (int k = 0; k < 6; k++)
+            {
+                double a = k * Math.PI / 3 - effectTime;
+                braille.Line(cx + (float)Math.Cos(a) * size * 0.07f, cy + (float)Math.Sin(a) * size * 0.07f,
+                    cx + (float)Math.Cos(a + 0.8) * size * (0.17f + bass * 0.1f) * SceneValue("core"),
+                    cy + (float)Math.Sin(a + 0.8) * size * (0.17f + bass * 0.1f) * SceneValue("core"), 1, 0.6f);
+            }
+        }
+
+        // Layered swells in perspective; the foreground crests react most strongly to bass.
+        void DrawOcean(int vh, float bass)
+        {
+            float w = scr.W * 2, h = vh * 4;
+            int layers = (int)SceneValue("layers");
+            for (int j = 0; j < layers; j++)
+            {
+                float depth = j / (float)Math.Max(1, layers - 1), px = 0, py = 0;
+                for (int x = 0; x < w; x += 2)
+                {
+                    double a = x / w * 9 / SceneValue("wavelength") + effectTime * (0.6 + depth) + j * 0.6;
+                    float swell = (float)(Math.Sin(a) + Math.Sin(a * 1.7 - effectTime) * 0.35);
+                    float y = h * (0.22f + depth * 0.65f) + swell * h * (0.012f + depth * 0.065f) * (0.5f + bass) * SceneValue("height");
+                    y -= Band(x / w) * h * 0.045f * depth;
+                    if (x > 0) braille.Line(px, py, x, y, 0.2f + depth * 0.65f, 0.2f + depth * 0.65f);
+                    px = x; py = y;
+                }
+            }
+        }
+
+        void DrawReef(int vh, float energy)
+        {
+            float w = scr.W * 2, h = vh * 4;
+            for (int i = 0; i < (int)SceneValue("plants"); i++)
+            {
+                float root = Seed(i * 11 + 1) * w, height = h * (0.15f + Seed(i * 11 + 2) * 0.45f);
+                float px = root, py = h - 1;
+                for (int j = 1; j <= 24; j++)
+                {
+                    float t = j / 24f;
+                    float x = root + (float)Math.Sin(effectTime + t * 2 + i) * t * t * (4 + energy * 12) * SceneValue("sway");
+                    float y = h - 1 - height * t * (0.7f + Band(Seed(i)) * 0.3f);
+                    braille.Line(px, py, x, y, 0.25f + t * 0.5f, 0.25f + t * 0.5f);
+                    if (j % 5 == 0)
+                        braille.Line(x, y, x + (j % 2 == 0 ? 1 : -1) * height * 0.15f, y - height * 0.12f, 0.4f, 0.85f);
+                    px = x; py = y;
+                }
+            }
+            for (int i = 0; i < (int)SceneValue("bubbles"); i++)
+            {
+                float y = h * (1 - (float)Frac(Seed(i + 200) + effectTime * (0.04 + Seed(i) * 0.07)));
+                float x = Seed(i + 400) * w + (float)Math.Sin(effectTime + i + y * 0.06) * 3;
+                Circle(x, y, 1 + Seed(i + 700) * 2, 0.3f + energy * 0.6f, 10);
+            }
+        }
+
+        void DrawJellyfish(int vh, float bass)
+        {
+            float w = scr.W * 2, h = vh * 4;
+            int count = (int)SceneValue("count");
+            for (int i = 0; i < count; i++)
+            {
+                float cx = w * (i + 0.5f) / count + (float)Math.Sin(effectTime * 0.4 + i) * w * 0.035f;
+                float cy = h * (0.22f + Seed(i + 80) * 0.3f) + (float)Math.Sin(effectTime + i) * h * 0.06f;
+                float r = Math.Min(w / (count * 2.5f), h * 0.12f) * (0.9f + bass * 0.3f) * SceneValue("size");
+                for (int k = 0; k <= 60; k++)
+                {
+                    double a = Math.PI * k / 60;
+                    float x = cx + (float)Math.Cos(a) * r, y = cy - (float)Math.Sin(a) * r * 0.75f;
+                    braille.Plot((int)x, (int)y, 0.7f + bass * 0.3f);
+                    if (k % 6 == 0) braille.Line(x, y, cx + (x - cx) * 0.6f, cy, 0.6f, 0.35f);
+                }
+                braille.Line(cx - r, cy, cx + r, cy, 0.8f, 0.8f);
+                int tentacles = (int)SceneValue("tentacles");
+                for (int k = 0; k < tentacles; k++)
+                {
+                    float u = k / (float)(tentacles - 1);
+                    float px = cx - r * 0.8f + r * 1.6f * u, py = cy;
+                    float length = r * (2 + Seed(i * 13 + k) * 2) * (0.7f + Band(u) * 0.4f) * SceneValue("length");
+                    for (int j = 1; j <= 30; j++)
+                    {
+                        float t = j / 30f;
+                        float x = cx - r * 0.8f + r * 1.6f * u + (float)Math.Sin(t * 5 - effectTime * 2 + k) * t * r * 0.3f;
+                        float y = cy + length * t;
+                        braille.Line(px, py, x, y, 0.65f - t * 0.4f, 0.65f - t * 0.4f);
+                        px = x; py = y;
+                    }
+                }
+            }
+        }
+
+        void DrawAurora(int vh, float energy)
+        {
+            float w = scr.W * 2, h = vh * 4;
+            for (int i = 0; i < (int)SceneValue("stars"); i++)
+                braille.Plot((int)(Seed(i + 900) * w), (int)(Seed(i + 1000) * h * 0.65f), 0.2f + Seed(i + 1100) * 0.3f);
+            int curtains = (int)SceneValue("curtains");
+            for (int j = 0; j < curtains; j++)
+                for (int x = 0; x < w; x += 2)
+                {
+                    float u = x / w;
+                    double a = u * 7 + j * 0.8 + effectTime * 0.35;
+                    float y = h * (0.23f + j * 0.06f) + (float)(Math.Sin(a) + Math.Sin(a * 1.6) * 0.35) * h * 0.1f;
+                    float length = h * (0.08f + Band(u) * 0.22f + energy * 0.05f) * SceneValue("height");
+                    braille.Line(x, y, x, y + length, 0.7f + Band(u) * 0.25f, 0.08f);
+                }
         }
 
         // XY oscilloscope, as used for oscilloscope music: the left channel drives the beam horizontally and
@@ -1633,8 +2072,10 @@ namespace TermVis
             {
                 "DMZ TermVis controls",
                 "",
-                "M / 1-8      mode: bars, mirror, wave, waterfall,",
-                "             rain, code, radial, scope (XY)",
+                "M / Shift+M  next / previous mode (18 modes)",
+                "1-8          original modes: bars through scope",
+                "T            suggested colors for this mode",
+                "Tab          settings for the selected effect",
                 "C / Shift+C  next / previous color theme",
                 "K            glyph style: blocks, ascii, code, dots",
                 "V            color by: height, frequency, loudness",
@@ -1664,24 +2105,25 @@ namespace TermVis
 
         void DrawSettings()
         {
+            List<Param> active = ActiveParams();
             const int nameW = 20, valW = 18;
             int bw = nameW + valW + 8;
-            int visible = Math.Min(pars.Count, Math.Max(1, scr.H - 6));
-            int first = Clamp(selected - visible / 2, 0, pars.Count - visible);
+            int visible = Math.Min(active.Count, Math.Max(1, scr.H - 6));
+            int first = Clamp(selected - visible / 2, 0, active.Count - visible);
             int bh = visible + 4;
             int x0 = Math.Max(0, (scr.W - bw) / 2), y0 = Math.Max(0, (scr.H - bh) / 2);
             int border = Pal(0.8f), bg = 0x14141E;
             DrawBox(x0, y0, bw, bh, border, bg);
-            scr.Text(x0 + 2, y0 + 1, "Settings", border, bg);
-            string hint = "Up/Down select  Left/Right change  Tab close";
+            scr.Text(x0 + 2, y0 + 1, ModeNames[Mode] + " settings", border, bg);
+            string hint = "Up/Down select  Left/Right edit  Tab close";
             scr.Text(x0 + 2, y0 + bh - 2, hint.Length > bw - 4 ? hint.Substring(0, bw - 4) : hint, 0x8C8C96, bg);
             for (int r = 0; r < visible; r++)
             {
                 int i = first + r;
                 bool sel = i == selected;
                 int rowBg = sel ? Scale(Pal(0.7f), 0.35) : bg;
-                string val = pars[i].Get();
-                string text = " " + pars[i].Name.PadRight(nameW) + (sel ? "< " : "  ") + val.PadRight(valW - 4) + (sel ? " >" : "  ");
+                string val = active[i].Get();
+                string text = " " + active[i].Name.PadRight(nameW) + (sel ? "< " : "  ") + val.PadRight(valW - 4) + (sel ? " >" : "  ");
                 if (text.Length > bw - 2) text = text.Substring(0, bw - 2);
                 scr.Text(x0 + 1, y0 + 2 + r, text.PadRight(bw - 2), sel ? 0xFFFFFF : 0xC8C8D2, rowBg);
             }
@@ -1723,9 +2165,18 @@ namespace TermVis
                     Console.WriteLine("  --mic                 Windows: visualize the microphone instead of system audio");
                     Console.WriteLine("  --system              Windows: visualize system audio (default)");
                     Console.WriteLine("                        (macOS always uses the default input device)");
-                    Console.WriteLine("  --mode <name|1-8>     bars, mirror, wave, waterfall, rain, code, radial, scope");
+                    Console.WriteLine("  --mode <name|1-18>    bars, mirror, wave, waterfall, rain, code, radial, scope,");
+                    Console.WriteLine("                        retro, warp, tunnel, nebula, radar, reactor,");
+                    Console.WriteLine("                        ocean, reef, jellyfish, aurora");
                     Console.WriteLine("  --theme <name>        fire, ocean, neon, matrix, rainbow, mono, synthwave,");
                     Console.WriteLine("                        cyberpunk, sunset, amber, ice, toxic, blood, vapor, phosphor");
+                    Console.WriteLine("                        arcade, starlight, laser, cosmic, sonar, plasma,");
+                    Console.WriteLine("                        lagoon, coral, abyss, borealis");
+                    Console.WriteLine("  --effectspeed <n>     set all scene speeds, 0.25..4 (legacy shortcut)");
+                    Console.WriteLine("  --effectdetail <n>    set scene count multipliers, 0.5..2 (legacy shortcut)");
+                    Console.WriteLine("  --jellyfish.count <n> jellyfish count, 1..20");
+                    Console.WriteLine("  --warp.stars <n>      warp star count, 20..1000");
+                    Console.WriteLine("  --<mode>.<key> <n>    any individual effect key from termvis.ini");
                     Console.WriteLine("  --glyphs <name>       blocks, ascii, code, dots");
                     Console.WriteLine("  --colorby <name>      height, frequency, loudness");
                     Console.WriteLine("  --gain <dB>           extra gain, -30..30");

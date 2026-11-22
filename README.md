@@ -2,10 +2,10 @@
 
 A real-time audio visualizer that runs entirely in your terminal. It turns music into animated text using colored block characters, braille dots and scrolling code. It's a single standalone program with nothing to install.
 
-- **8 modes:** Bars, Mirror, Wave (oscilloscope), Waterfall (spectrogram), Rain (falling code), Code (scrolling source code lit up by the spectrum), Radial, and **Scope**, a true XY oscilloscope for [oscilloscope music](#oscilloscope-music-scope-mode)
-- **15 color themes:** Fire, Ocean, Neon, Matrix, Rainbow, Mono, Synthwave, Cyberpunk, Sunset, Amber, Ice, Toxic, Blood, Vapor, Phosphor
+- **18 modes:** Retro, Warp, Tunnel, Nebula, Radar, Reactor, Ocean, Reef, Jellyfish, Aurora, plus the original Bars, Mirror, Wave (oscilloscope), Waterfall (spectrogram), Rain (falling code), Code (scrolling source code lit up by the spectrum), Radial, and **Scope**, a true XY oscilloscope for [oscilloscope music](#oscilloscope-music-scope-mode)
+- **25 color themes:** Arcade, Starlight, Laser, Cosmic, Sonar, Plasma, Lagoon, Coral, Abyss, Borealis, plus Fire, Ocean, Neon, Matrix, Rainbow, Mono, Synthwave, Cyberpunk, Sunset, Amber, Ice, Toxic, Blood, Vapor, Phosphor
 - **4 glyph styles** for bars: Blocks, ASCII, Code, Dots
-- A **settings panel** with 27 adjustable parameters, saved automatically so it reopens where you left off
+- A **context-aware settings panel** with controls for the selected effect and automatically saved preferences
 - **Windows:** visualizes whatever your PC is playing (no setup needed), or the microphone
 - **macOS:** visualizes the default input device (mic, or system audio via [BlackHole](#visualizing-system-audio-on-macos))
 
@@ -98,6 +98,48 @@ macOS doesn't let apps listen to system audio directly. The free [BlackHole](htt
 
 To go back, set Output to your speakers and Input to your microphone.
 
+## Scene effects
+
+Press **M / Shift+M** to browse all modes, or use **Tab → Mode**. Press **T** to try the suggested palette for a mode. Colors stay independent of modes, so **C / Shift+C** still lets you mix any effect with any palette.
+
+| Mode | Look and audio response | Suggested palette |
+|---|---|---|
+| Retro | Striped sunset, moving perspective grid, spectrum mountains | Arcade |
+| Warp | Flight through a star field; bass and spectrum lengthen the streaks | Starlight |
+| Tunnel | Twisting polygon rings with spectrum-shaped walls | Laser |
+| Nebula | Rotating spiral galaxy with arms that ripple to the spectrum | Cosmic |
+| Radar | Sweeping scanner with fading frequency-reactive contacts | Sonar |
+| Reactor | Counter-rotating segmented rings and a pulsing energy core | Plasma |
+| Ocean | Layered rolling swells with bass-driven crests | Lagoon |
+| Reef | Swaying branching sea plants and rising bubbles | Coral |
+| Jellyfish | Floating bells with frequency-reactive, flowing tentacles | Abyss |
+| Aurora | Moving curtains of light over a star field | Borealis |
+
+The **Tab settings panel follows the selected mode**. Change its first row, **Mode**, with Left/Right and the controls update immediately. Unrelated settings are hidden: Scope shows beam controls, Rain shows rain controls, and Jellyfish shows jellyfish controls. The title names the current effect. Use Up/Down to select a setting and Left/Right to adjust it; changes appear immediately behind the panel.
+
+All ten scenes have their own **Motion speed** and **Audio response**, plus these controls:
+
+| Effect | Appearance controls |
+|---|---|
+| Retro | Grid lines, sun size |
+| Warp | Star count, streak length, star spread |
+| Tunnel | Ring count, polygon sides, twist |
+| Nebula | Particle count, galaxy arms, arm spread |
+| Radar | Contact count, range rings, sweep trail |
+| Reactor | Ring count, ring rotation, core size |
+| Ocean | Wave layers, wave height, wavelength |
+| Reef | Plant count, bubble count, plant sway |
+| Jellyfish | Jellyfish count (1–20), size, tentacle count (2–16), tentacle length |
+| Aurora | Light curtains, curtain height, star count |
+
+These scene settings are independent and saved for every effect, including inactive ones. For example, changing Warp's speed leaves Jellyfish's speed alone. **Reset this effect** restores the current effect's appearance controls; **R** still resets all preferences. Palette, audio input, gain and terminal settings remain shared. Bars, Mirror and Code retain their existing shared bar layout preferences.
+
+The original modes also have relevant controls: Wave zoom; Waterfall scroll speed; Rain speed, density and trail length; Code scroll speed and glitch amount; Radial spin, spectrum bands and ring size; and Scope's beam controls. Lower particle/layer counts can help on large terminals. Scenes keep gentle ambient motion during silence; **Audio response** controls how strongly the music changes their motion and geometry, and zero disables the audio reaction.
+
+Older saved `effectspeed` and `effectdetail` values are still read and used to initialize the new scene settings. Subsequent saves use individual keys such as `warp.speed`, `warp.stars`, `jellyfish.count` and `jellyfish.tentacles`.
+
+Try `run.bat --mode warp --theme starlight` on Windows, or `./termvis --mode ocean --theme lagoon` on macOS. Numeric `--mode` values 9–18 select the new scenes in the table's order.
+
 ## Oscilloscope music (Scope mode)
 
 Press **8** for Scope mode. It works like a real analog oscilloscope in **XY mode**: the **left channel moves the beam horizontally** and the **right channel moves it vertically**. Oscilloscope music is composed so that this draws pictures, such as shapes, text and animations, while you listen. Ordinary stereo music shows a shifting, cloud-like pattern, and mono audio shows a diagonal line.
@@ -131,7 +173,9 @@ Press **H** at any time to see these on screen, or **Tab** to open the settings 
 
 | Key | Action |
 |---|---|
-| **M** / **1–8** | Change mode |
+| **M** / **Shift+M** | Next / previous mode (all 18) |
+| **1–8** | Jump to an original mode (Bars through Scope) |
+| **T** | Apply the suggested palette for the current mode |
 | **C** / **Shift+C** | Next / previous color theme |
 | **K** | Glyph style: blocks, ascii, code, dots |
 | **V** | Color by: height, frequency, loudness |
@@ -147,7 +191,7 @@ Press **H** at any time to see these on screen, or **Tab** to open the settings 
 | **R** | Reset to defaults |
 | **Q** / **Esc** | Quit |
 
-The settings panel also covers dynamic range, low and high frequency cutoffs, treble boost, peak gravity, rain speed, code scroll speed, radial spin, the scope options, frame rate and terminal color mode.
+The settings panel shows the current effect's appearance controls alongside relevant audio controls, frame rate and terminal color mode. Its list updates immediately when you select another mode.
 
 Settings are saved to `termvis.ini` next to the program about a second after any change, so closing the window keeps them. You can also edit that file by hand.
 
@@ -157,9 +201,18 @@ Settings are saved to `termvis.ini` next to the program about a second after any
 termvis [options]
   --mic                 Windows: visualize the microphone instead of system audio
   --system              Windows: visualize system audio (default)
-  --mode <name|1-8>     bars, mirror, wave, waterfall, rain, code, radial, scope
+  --mode <name|1-18>    bars, mirror, wave, waterfall, rain, code, radial, scope,
+                        retro, warp, tunnel, nebula, radar, reactor,
+                        ocean, reef, jellyfish, aurora
   --theme <name>        fire, ocean, neon, matrix, rainbow, mono, synthwave,
-                        cyberpunk, sunset, amber, ice, toxic, blood, vapor, phosphor
+                        cyberpunk, sunset, amber, ice, toxic, blood, vapor, phosphor,
+                        arcade, starlight, laser, cosmic, sonar, plasma,
+                        lagoon, coral, abyss, borealis
+  --effectspeed <n>     set all scene speeds, 0.25..4 (legacy shortcut)
+  --effectdetail <n>    set scene count multipliers, 0.5..2 (legacy shortcut)
+  --jellyfish.count <n> jellyfish count, 1..20
+  --warp.stars <n>      warp star count, 20..1000
+  --<mode>.<key> <n>    any individual effect key from termvis.ini
   --glyphs <name>       blocks, ascii, code, dots
   --colorby <name>      height, frequency, loudness
   --gain <dB>           extra gain, -30..30
