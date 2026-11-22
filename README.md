@@ -1,8 +1,8 @@
-﻿# DMZ TermVis
+# DMZ TermVis
 
 A real-time audio visualizer that runs entirely in your terminal. It turns music into animated text using colored block characters, braille dots and scrolling code. It's a single standalone program with nothing to install.
 
-- **18 modes:** Retro, Warp, Tunnel, Nebula, Radar, Reactor, Ocean, Reef, Jellyfish, Aurora, plus the original Bars, Mirror, Wave (oscilloscope), Waterfall (spectrogram), Rain (falling code), Code (scrolling source code lit up by the spectrum), Radial, and **Scope**, a true XY oscilloscope for [oscilloscope music](#oscilloscope-music-scope-mode)
+- **22 modes:** Kaleido, Tendrils, Cells, Terrain, Retro, Warp, Tunnel, Nebula, Radar, Reactor, Ocean, Reef, Jellyfish, Aurora, plus the original Bars, Mirror, Wave (oscilloscope), Waterfall (spectrogram), Rain (falling code), Code (scrolling source code lit up by the spectrum), Radial, and **Scope**, a true XY oscilloscope for [oscilloscope music](#oscilloscope-music-scope-mode)
 - **25 color themes:** Arcade, Starlight, Laser, Cosmic, Sonar, Plasma, Lagoon, Coral, Abyss, Borealis, plus Fire, Ocean, Neon, Matrix, Rainbow, Mono, Synthwave, Cyberpunk, Sunset, Amber, Ice, Toxic, Blood, Vapor, Phosphor
 - **4 glyph styles** for bars: Blocks, ASCII, Code, Dots
 - A **context-aware settings panel** with controls for the selected effect and automatically saved preferences
@@ -15,9 +15,9 @@ Get the archive for your system from the [Releases](../../releases) page:
 
 | System | File |
 |---|---|
-| Windows 10/11 (64-bit) | `DMZ-TermVis-1.1-windows-x64.zip` |
-| Mac with Apple Silicon (M1 and later) | `DMZ-TermVis-1.1-macos-arm64.tar.gz` |
-| Mac with Intel processor | `DMZ-TermVis-1.1-macos-intel-x64.tar.gz` |
+| Windows 10/11 (64-bit) | `DMZ-TermVis-1.3-windows-x64.zip` |
+| Mac with Apple Silicon (M1 and later) | `DMZ-TermVis-1.3-macos-arm64.tar.gz` |
+| Mac with Intel processor | `DMZ-TermVis-1.3-macos-intel-x64.tar.gz` |
 
 ### Windows
 
@@ -31,13 +31,13 @@ It looks best in **Windows Terminal**, the default on Windows 11. If Windows Sma
 
 TermVis isn't registered with Apple, so macOS needs a one-time setup before it will run it. Do these steps in **Terminal**, not by double-clicking files in Finder.
 
-1. **Extract the download.** Double-click the `.tar.gz` file in your Downloads folder. This creates a folder like `DMZ-TermVis-1.1-macos-arm64`.
+1. **Extract the download.** Double-click the `.tar.gz` file in your Downloads folder. This creates a folder like `DMZ-TermVis-1.3-macos-arm64`.
 
 2. **Open Terminal** (Applications → Utilities → Terminal, or press ⌘ Space and type *Terminal*).
 
 3. **Go to the folder.** Use `macos-intel-x64` instead if you downloaded the Intel version:
    ```sh
-   cd ~/Downloads/DMZ-TermVis-1.1-macos-arm64
+   cd ~/Downloads/DMZ-TermVis-1.3-macos-arm64
    ```
 
 4. **Run the one-time setup:**
@@ -55,7 +55,7 @@ TermVis isn't registered with Apple, so macOS needs a one-time setup before it w
 
 6. **Allow microphone access.** The first time, macOS asks whether Terminal may use the microphone. Click **Allow**. TermVis needs this to hear any audio, including system audio through BlackHole.
 
-Next time, open Terminal and run `cd ~/Downloads/DMZ-TermVis-1.1-macos-arm64` and then `./termvis`. You can move the folder anywhere you like and `cd` there instead.
+Next time, open Terminal and run `cd ~/Downloads/DMZ-TermVis-1.3-macos-arm64` and then `./termvis`. You can move the folder anywhere you like and `cd` there instead.
 
 #### macOS troubleshooting
 
@@ -117,7 +117,7 @@ Press **M / Shift+M** to browse all modes, or use **Tab → Mode**. Press **T** 
 
 The **Tab settings panel follows the selected mode**. Change its first row, **Mode**, with Left/Right and the controls update immediately. Unrelated settings are hidden: Scope shows beam controls, Rain shows rain controls, and Jellyfish shows jellyfish controls. The title names the current effect. Use Up/Down to select a setting and Left/Right to adjust it; changes appear immediately behind the panel.
 
-All ten scenes have their own **Motion speed** and **Audio response**, plus these controls:
+All fourteen scenes have their own **Motion speed** and **Audio response**, plus these controls:
 
 | Effect | Appearance controls |
 |---|---|
@@ -131,6 +131,10 @@ All ten scenes have their own **Motion speed** and **Audio response**, plus thes
 | Reef | Plant count, bubble count, plant sway |
 | Jellyfish | Jellyfish count (1–20), size, tentacle count (2–16), tentacle length |
 | Aurora | Light curtains, curtain height, star count |
+| Kaleido | Mirror folds |
+| Tendrils | Tendril count |
+| Cells | Cell count |
+| Terrain | Terrain layers |
 
 These scene settings are independent and saved for every effect, including inactive ones. For example, changing Warp's speed leaves Jellyfish's speed alone. **Reset this effect** restores the current effect's appearance controls; **R** still resets all preferences. Palette, audio input, gain and terminal settings remain shared. Bars, Mirror and Code retain their existing shared bar layout preferences.
 
@@ -138,7 +142,7 @@ The original modes also have relevant controls: Wave zoom; Waterfall scroll spee
 
 Older saved `effectspeed` and `effectdetail` values are still read and used to initialize the new scene settings. Subsequent saves use individual keys such as `warp.speed`, `warp.stars`, `jellyfish.count` and `jellyfish.tentacles`.
 
-Try `run.bat --mode warp --theme starlight` on Windows, or `./termvis --mode ocean --theme lagoon` on macOS. Numeric `--mode` values 9–18 select the new scenes in the table's order.
+Try `run.bat --mode warp --theme starlight` on Windows, or `./termvis --mode ocean --theme lagoon` on macOS. Numeric `--mode` values 9–18 select Retro through Aurora; 19–22 select Kaleido, Tendrils, Cells and Terrain. The v1.2 keyboard shortcuts 9/0/-/= and saved mode names still select the same effects.
 
 ## Oscilloscope music (Scope mode)
 
@@ -173,8 +177,11 @@ Press **H** at any time to see these on screen, or **Tab** to open the settings 
 
 | Key | Action |
 |---|---|
-| **M** / **Shift+M** | Next / previous mode (all 18) |
+| **M** / **Shift+M** | Next / previous mode (all 22) |
 | **1–8** | Jump to an original mode (Bars through Scope) |
+| **9 / 0 / - / =** | Kaleido / Tendrils / Cells / Terrain |
+| **Space** | Play / pause music |
+| **N / P** | Next / previous track |
 | **T** | Apply the suggested palette for the current mode |
 | **C** / **Shift+C** | Next / previous color theme |
 | **K** | Glyph style: blocks, ascii, code, dots |
@@ -184,7 +191,7 @@ Press **H** at any time to see these on screen, or **Tab** to open the settings 
 | **A** | Auto-gain on/off |
 | **← / →** | Bar width |
 | **G** | Gaps between bars |
-| **P** | Peak markers |
+| **Shift+P** | Peak markers |
 | **[ / ]** | Less / more smoothing |
 | **Tab** or **E** | Settings panel (↑↓ select, ←→ change) |
 | **B** | Status bar on/off |
@@ -195,15 +202,34 @@ The settings panel shows the current effect's appearance controls alongside rele
 
 Settings are saved to `termvis.ini` next to the program about a second after any change, so closing the window keeps them. You can also edit that file by hand.
 
+## Playback controls
+
+TermVis controls your external music player; it does not load or play audio files itself.
+
+- **Windows:** sends standard media keys to the player registered with Windows, including supported browser players.
+- **macOS:** controls running Spotify or Music apps. It prefers a currently playing app, then the last controlled app, then Spotify if both are paused. Open your player first. macOS may ask you to allow your terminal to control it under **Privacy & Security → Automation**. Browser playback is not controlled on macOS.
+- Commands run in the background. A short message reports the selected player or an error. Playback controls also work with the settings panel open.
+
+## Experimental visualizations
+
+| Mode | Shortcut | Motion |
+|---|---|---|
+| Kaleido | **9** | Eightfold interference tunnel; bass drives travel, mids warp the folds, highs add ripples |
+| Tendrils | **0** | A colony of curling roots or jellyfish limbs, with individual frequency bands stretching each limb |
+| Cells | **-** | Drifting liquid membranes that fuse and separate, with spectral energy changing their size |
+| Terrain | **=** | A moving topographic ocean; bass raises hills and treble ruffles the ridges |
+
+All modes use the current color theme and gain/smoothing settings. Try Neon or Vapor with Kaleido, Ocean with Tendrils, Toxic with Cells, and Phosphor with Terrain. They retain gentle motion in silence.
+
 ## Command-line options
 
 ```
 termvis [options]
   --mic                 Windows: visualize the microphone instead of system audio
   --system              Windows: visualize system audio (default)
-  --mode <name|1-18>    bars, mirror, wave, waterfall, rain, code, radial, scope,
+  --mode <name|1-22>    bars, mirror, wave, waterfall, rain, code, radial, scope,
                         retro, warp, tunnel, nebula, radar, reactor,
-                        ocean, reef, jellyfish, aurora
+                        ocean, reef, jellyfish, aurora, kaleido, tendrils, cells, terrain
   --theme <name>        fire, ocean, neon, matrix, rainbow, mono, synthwave,
                         cyberpunk, sunset, amber, ice, toxic, blood, vapor, phosphor,
                         arcade, starlight, laser, cosmic, sonar, plasma,
@@ -229,6 +255,14 @@ termvis [options]
 ## Building from source
 
 Everything is in one file, `termvis.cs`.
+
+For local development with the .NET 8 SDK:
+
+```sh
+dotnet run --project TermVis.csproj -- --mode kaleido --theme neon
+```
+
+The original Windows framework-compiler build remains supported. See `tests/README.md` for renderer and media-routing checks.
 
 - **Windows, quick:** `run.bat` compiles and runs it in memory using the C# compiler built into Windows. You don't need an SDK. `build.bat` makes a `termvis.exe` the same way.
 - **Release builds:** install the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) and Python 3, then run `release.ps1`. It writes self-contained Windows and macOS archives to `dist/`.

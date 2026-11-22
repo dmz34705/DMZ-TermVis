@@ -40,7 +40,7 @@ public static class EffectsSmoke
                             case 5: Call(viz, "DrawCode", h, dt); break;
                             case 6: Call(viz, "DrawRadial", h, dt); break;
                             case 7: Call(viz, "DrawScope", h, dt); break;
-                            default: Call(viz, "DrawEffect", h, dt); break;
+                            default: Call(viz, mode < 18 ? "DrawEffect" : "DrawDream", h, dt); break;
                         }
     }
     public static string Run(Assembly assembly, string folder)
@@ -48,7 +48,7 @@ public static class EffectsSmoke
         object viz = Activator.CreateInstance(assembly.GetType("TermVis.Viz"), true);
         object screen = Get(viz, "scr"), rings = Get(viz, "rings");
         string[] modes = (string[])Get(viz, "ModeNames"), themes = (string[])Get(viz, "ThemeNames");
-        Check(modes.Length == 18 && themes.Length == 25, "Mode / palette counts");
+        Check(modes.Length == 22 && themes.Length == 25, "Mode / palette counts");
         foreach (string theme in themes)
         {
             Check((bool)Call(viz, "Apply", "theme", theme), "Theme parse " + theme);
@@ -97,7 +97,7 @@ public static class EffectsSmoke
                         frames++;
                         foreach (int c in (int[])Get(screen, "Fg")) Check(c >= -1 && c <= 0xffffff, "Invalid frame RGB");
                     }
-                    if (mode >= 8 && size == 2)
+                    if (mode >= 8 && mode < 18 && size == 2)
                     {
                         char[] chars = (char[])Get(screen, "Ch"); int[] colors = (int[])Get(screen, "Fg");
                         int visible = 0;
@@ -126,7 +126,7 @@ public static class EffectsSmoke
         // Each scene must visibly respond to changed audio, with the same clock and dimensions.
         Set(screen,"W",100); Set(screen,"H",32);
         Set(screen,"Ch",new char[3200]); Set(screen,"Fg",new int[3200]); Set(screen,"Bg",new int[3200]);
-        for (int mode = 8; mode < modes.Length; mode++)
+        for (int mode = 8; mode < 18; mode++)
         {
             Set(viz,"Mode",mode);
             string[] pictures = new string[2];
@@ -183,7 +183,7 @@ public static class EffectsSmoke
             Check(scope == (mode == 7) && rain == (mode == 4) && bars == (mode <= 1),"Original control visibility");
             Set(viz,"selected",0);
             ((Action<int>)Get(active[0],"Adjust"))(1);
-            Check((int)Get(viz,"Mode") == (mode+1)%18,"Mode picker");
+            Check((int)Get(viz,"Mode") == (mode+1)%modes.Length,"Mode picker");
             Call(viz,"ActiveParams"); Call(viz,"DrawSettings");
         }
         // Save real settings-buffer previews for layout inspection.
@@ -250,7 +250,7 @@ public static class EffectsSmoke
             int eq = line.IndexOf('='); Check((bool)Call(copy,"Apply",line.Substring(0,eq),line.Substring(eq+1)),"Settings parse");
         }
         Check(settings == (string)Call(copy,"SettingsText"),"Settings round trip");
-        return "PASS: 18 modes, 25 palettes, " + frames + " frames at 4 sizes; all new scenes react to audio; frame-rate independent clock; contextual menus, parameter limits, independent settings and reset, legacy migration, settings round trip. Elapsed " + timer.Elapsed.TotalSeconds.ToString("0.0") + " s.";
+        return "PASS: 22 modes, 25 palettes, " + frames + " frames at 4 sizes; all new scenes react to audio; frame-rate independent clock; contextual menus, parameter limits, independent settings and reset, legacy migration, settings round trip. Elapsed " + timer.Elapsed.TotalSeconds.ToString("0.0") + " s.";
     }
 }
 '@
